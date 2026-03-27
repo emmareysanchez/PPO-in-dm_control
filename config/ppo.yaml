@@ -1,0 +1,109 @@
+# Configuración Práctica 3 - Aprendizaje por Refuerzo Profundo
+# Control Continuo con Observaciones Visuales (RGB)
+# Curso 2025/2026
+
+# ======================================================
+# CONFIGURACIÓN PRÁCTICA 3 - DRL MUIA (2025/2026)
+# Control Continuo Discretizado con Observaciones RGB
+# ======================================================
+
+experiment:
+  name: "walker_ppo_visual_discretized"
+  device: "cuda"  #
+  seed: 0         #
+
+environment:
+  domain: "walker"
+  task: "walk"
+  observation_height: 54 
+  observation_width: 54  
+  frame_stack: 4         
+  grayscale: false       
+  action_repeat: 1       
+  
+  # Set de acciones de la Práctica 2 (DQN)
+  # Estructura: [cadera_izq, rodilla_izq, tobillo_izq, cadera_der, rodilla_der, tobillo_der]
+  action_prototypes:
+
+  # 0) noop
+  - [+0, +0, +0, +0, +0, +0]
+
+  # hip
+  - [+0, +0, +0, +1, +0, +0]
+  - [+0, +0, +0, -1, +0, +0]
+  - [+1, +0, +0, +0, +0, +0]
+  - [-1, +0, +0, +0, +0, +0]
+
+  # knee
+  - [+0, +0, +0, +0, +1, +0]
+  - [+0, +0, +0, +0, -1, +0]
+  - [+0, +1, +0, +0, +0, +0]
+  - [+0, -1, +0, +0, +0, +0]
+
+  # ankle
+  - [+0, +0, +0, +0, +0, +1]
+  - [+0, +0, +0, +0, +0, -1]
+  - [+0, +0, +1, +0, +0, +0]
+  - [+0, +0, -1, +0, +0, +0]
+
+  # tobillo + rodilla
+  - [+0, +0, +0, +0, +1, -1]   # lean-forward correction (moderate)
+  - [+0, +0, +0, +0, -1, +1]   # lean-back correction (strong)
+  - [+0, +1, -1, +0, +0, +0]   # lean-forward correction (moderate)p
+  - [+0, -1, +1, +0, +0, +0]   # lean-back correction (strong)
+
+  - [+0, +0, +0, +0, +1, +1]
+  - [+0, +0, +0, +0, -1, -1]
+  - [+0, +1, +1, +0, +0, +0]
+  - [+0, -1, -1, +0, +0, +0]
+  
+  # cadera + rodilla
+  - [+0, +0, +0, +1, -1, +0]
+  - [+0, +0, +0, -1, +1, +0]
+  - [+1, -1, +0, +0, +0, +0]
+  - [-1, +1, +0, +0, +0, +0]
+
+  # COORDINACIÓN SIMÉTRICA
+
+  # coordinación cadera
+  - [+1, +0, +0, -1, +0, +0]
+  - [-1, +0, +0, +1, +0, +0]
+
+  # cadera + rodilla
+  - [+1, -1, +0, -1, +1, +0]
+  - [-1, +1, +0, +1, -1, +0]
+
+  # cadera + rodilla
+  - [+1, -1, +0, -1, +1, +0]
+  - [-1, +1, +0, +1, -1, +0]
+
+  # coordinación tobillos
+  - [+0, +0, -1, +0, +0, +1]
+  - [+0, +0, +1, +0, +0, -1]
+
+architecture:
+  encoder_type: "cnn"
+  [cite_start]hidden_dim: 256 # Dimensión de la capa densa tras la CNN [cite: 81]
+
+[cite_start]ppo: # Parte 1: On-policy [cite: 38]
+  actor_lr: 5.0e-5  # Basado en tu DQN
+  critic_lr: 1.0e-4
+  gamma: 0.99       #
+  [cite_start]lambd: 0.95       # GAE para estimar ventajas [cite: 44]
+  [cite_start]k_epochs: 10      # Épocas de optimización por batch [cite: 39]
+  [cite_start]eps_clip: 0.2     # Clipping de PPO [cite: 41]
+  [cite_start]entropy_coef: 0.01 # Fomenta la exploración [cite: 16]
+
+[cite_start]sac: # Parte 2: Off-policy [cite: 45]
+  actor_lr: 3.0e-4
+  critic_lr: 3.0e-4
+  gamma: 0.99
+  [cite_start]tau: 0.005        # Soft update de redes target [cite: 52]
+  [cite_start]alpha: 0.2        # Coeficiente de entropía inicial [cite: 47]
+  [cite_start]auto_tune_alpha: true # Versión SAC v2 [cite: 60]
+  batch_size: 64    #
+  buffer_size: 200000 #
+
+logging:
+  [cite_start]save_freq: 500    # Frecuencia de guardado de checkpoints [cite: 82]
+  log_dir: "./results"
