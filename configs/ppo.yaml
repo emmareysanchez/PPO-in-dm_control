@@ -121,7 +121,7 @@ environment:
   observation_width: 54
   frame_stack: 4
   grayscale: false
-  action_repeat: 1
+  action_repeat: 4
   time_limit: 1000
 
   action_prototypes:
@@ -171,8 +171,8 @@ architecture:
   hidden_dim: 256
 
 ppo:
-  actor_lr: 5.0e-5
-  critic_lr: 1.0e-4
+  actor_lr: 3e-4
+  critic_lr: 1e-4
   gamma: 0.99
   lambd: 0.95
   k_epochs: 10
@@ -184,7 +184,7 @@ ppo:
 
 train:
   total_steps: 1000000
-  rollout_size: 1024
+  rollout_size: 2048
   checkpoint_freq: 50000
   video_freq: 50000
   num_videos: 4
