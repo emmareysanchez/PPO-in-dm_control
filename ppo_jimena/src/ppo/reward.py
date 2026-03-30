@@ -34,8 +34,8 @@ def walker2d_reward(
     ctrl_cost = float(info.get("reward_ctrl", 0.0))  # ya viene negativo
 
     r = 0.0
-    r += 0.3 * healthy_reward   # suficiente señal para aprender a no caer
-    r += 1.5 * forward_reward   # prioriza avance pero sin ser agresivo
+    r += 0.8 * healthy_reward   # suficiente señal para aprender a no caer
+    r += 1.2 * forward_reward   # prioriza avance pero sin ser agresivo
     r += 1.0 * ctrl_cost        # penaliza torque excesivo (ya negativo)
 
     if not (terminated or truncated):
