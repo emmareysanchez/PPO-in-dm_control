@@ -1,0 +1,37 @@
+experiment:
+  name: "walker_ppo_visual_continuous"
+  device: "cuda"
+  seed: 0
+  num_steps: 10_000_000
+
+environment:
+  domain: "walker"
+  task: "walk"
+  observation_height: 64
+  observation_width: 64
+  frame_stack: 4
+  grayscale: false
+  action_repeat: 1
+  camera_id: 0
+  max_episode_steps: 1000
+
+architecture:
+  hidden_dim: 256
+
+ppo:
+  actor_lr: 5.0e-5
+  critic_lr: 1.0e-4
+  gamma: 0.99
+  lambd: 0.95
+  k_epochs: 10
+  eps_clip: 0.2
+  entropy_coef: 0.01
+  value_coef: 0.5
+  max_grad_norm: 0.5
+
+evaluation:
+  frequency: 250_000
+  episodes: 5
+  run: "runs/ppo/"
+  videos: "videos/ppo/"
+  checkpoints: "checkpoints/ppo/"

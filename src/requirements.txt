@@ -1,0 +1,12 @@
+numpy
+scipy
+torch
+dm-control
+opencv-python
+pyyaml
+matplotlib
+tqdm
+tensorboard
+imageio
+imageio-ffmpeg
+optuna

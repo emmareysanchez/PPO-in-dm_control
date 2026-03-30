@@ -1,0 +1,62 @@
+experiment:
+  name: "walker_ppo_visual_search"
+  device: "cuda"
+  seed: 0
+  num_steps: 10_000_000
+  trials: 30
+
+environment:
+  domain: "walker"
+  task: "walk"
+  observation_height: 64
+  observation_width: 64
+  frame_stack: 4
+  grayscale: false
+  action_repeat: 1
+  camera_id: 0
+  max_episode_steps: 1000
+
+architecture:
+  hidden_dim: 256
+
+search_space:
+  architecture:
+    hidden_dim:
+      min: 128
+      max: 512
+      step: 64
+  ppo:
+    actor_lr:
+      min: 1.0e-5
+      max: 3.0e-4
+    critic_lr:
+      min: 3.0e-5
+      max: 5.0e-4
+    gamma:
+      min: 0.97
+      max: 0.999
+    lambd:
+      min: 0.90
+      max: 0.99
+    k_epochs:
+      min: 4
+      max: 12
+    eps_clip:
+      min: 0.10
+      max: 0.30
+    entropy_coef:
+      min: 1.0e-4
+      max: 2.0e-2
+    value_coef:
+      min: 0.25
+      max: 1.00
+    max_grad_norm:
+      min: 0.3
+      max: 1.0
+
+evaluation:
+  frequency: 250_000
+  episodes: 5
+  run: "runs/ppo-search/"
+  videos: "videos/ppo-search/"
+  checkpoints: "checkpoints/ppo-search/"
