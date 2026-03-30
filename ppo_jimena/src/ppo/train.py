@@ -76,7 +76,7 @@ def resolve_env_spec(cfg: dict[str, Any]) -> EnvSpec:
     )
 
 
-def resolve_train_params(cfg: dict[str, Any]) -> dict[str, int]:
+def resolve_train_params(cfg: dict[str, Any]) -> dict[str, Any]:
     train_cfg = cfg.get("train", {})
     logging_cfg = cfg.get("logging", {})
 
@@ -86,7 +86,41 @@ def resolve_train_params(cfg: dict[str, Any]) -> dict[str, int]:
         "checkpoint_freq": int(train_cfg.get("checkpoint_freq", logging_cfg.get("checkpoint_freq", logging_cfg.get("save_freq", 50_000)))),
         "video_freq": int(train_cfg.get("video_freq", logging_cfg.get("video_freq", logging_cfg.get("save_freq", 50_000)))),
         "num_videos": int(train_cfg.get("num_videos", logging_cfg.get("num_videos", 4))),
+        "eval_freq": int(train_cfg.get("eval_freq", 10_000)),
+        "eval_episodes": int(train_cfg.get("eval_episodes", 5)),
     }
+
+
+def run_eval_episodes(
+    agent: PPOAgent,
+    spec: EnvSpec,
+    seed: int,
+    device: torch.device,
+    episodes: int,
+    video_dir: str,
+) -> list[float]:
+    """
+    Runs `episodes` deterministic episodes and returns the per-episode returns.
+    Uses make_eval_env so the wrapper stack is identical to training.
+    """
+    env = make_eval_env(spec=spec, seed=seed, video_dir=video_dir)
+    returns: list[float] = []
+
+    with torch.no_grad():
+        for _ in range(episodes):
+            obs, _ = env.reset()
+            done = False
+            total = 0.0
+            while not done:
+                obs_t = torch.tensor(obs, dtype=torch.float32, device=device)
+                action = agent.act_deterministic(obs_t)
+                obs, r, terminated, truncated, _ = env.step(action)
+                done = bool(terminated or truncated)
+                total += float(r)
+            returns.append(total)
+
+    env.close()
+    return returns
 
 
 def record_videos(
@@ -100,14 +134,15 @@ def record_videos(
     video_dir.mkdir(parents=True, exist_ok=True)
     env = make_eval_env(spec=spec, seed=seed, video_dir=str(video_dir))
 
-    for _ in range(int(num_videos)):
-        obs, _ = env.reset()
-        done = False
-        while not done:
-            obs_t = torch.tensor(obs, dtype=torch.float32, device=device)
-            action = agent.act_deterministic(obs_t)
-            obs, _r, terminated, truncated, _info = env.step(action)
-            done = bool(terminated or truncated)
+    with torch.no_grad():
+        for _ in range(int(num_videos)):
+            obs, _ = env.reset()
+            done = False
+            while not done:
+                obs_t = torch.tensor(obs, dtype=torch.float32, device=device)
+                action = agent.act_deterministic(obs_t)
+                obs, _r, terminated, truncated, _info = env.step(action)
+                done = bool(terminated or truncated)
 
     env.close()
 
@@ -128,9 +163,9 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
 
     run_name = time.strftime("%Y-%m-%d_%H-%M-%S")
 
-    run_dir = Path("runs") / "ppo" / run_name
-    video_dir = Path("videos") / "ppo" / run_name
-    ckpt_dir = Path("checkpoints") / "ppo" / run_name
+    run_dir   = Path("runs")         / "ppo" / run_name
+    video_dir = Path("videos")       / "ppo" / run_name
+    ckpt_dir  = Path("checkpoints")  / "ppo" / run_name
 
     run_dir.mkdir(parents=True, exist_ok=True)
     video_dir.mkdir(parents=True, exist_ok=True)
@@ -141,7 +176,7 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
     env = make_train_env(spec=env_spec, seed=seed)
 
     obs_shape = env.observation_space.shape
-    n_actions = int(env.action_space.n)
+    n_actions  = int(env.action_space.n)
 
     ppo_cfg = dict(cfg.get("ppo", {}))
     hidden_dim = int(cfg.get("architecture", {}).get("hidden_dim", 256))
@@ -167,9 +202,8 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
 
     episode_reward = 0.0
     episode_length = 0
-    episode_idx = 0
+    episode_idx    = 0
 
-    # Rolling window of the last 10 completed episode rewards for the progress bar
     recent_returns: deque[float] = deque(maxlen=10)
 
     total_steps = train_params["total_steps"]
@@ -195,6 +229,7 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
         episode_reward += float(reward)
         episode_length += 1
 
+        # ── PPO update ────────────────────────────────────────────────────────
         if buffer.ptr == buffer.size:
             with torch.no_grad():
                 last_value = (
@@ -208,12 +243,31 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
             buffer.reset()
 
             writer.add_scalar("train/policy_loss", loss_info["policy_loss"], global_step)
-            writer.add_scalar("train/value_loss", loss_info["value_loss"], global_step)
-            writer.add_scalar("train/entropy", loss_info["entropy"], global_step)
+            writer.add_scalar("train/value_loss",  loss_info["value_loss"],  global_step)
+            writer.add_scalar("train/entropy",      loss_info["entropy"],     global_step)
 
+        # ── Periodic deterministic eval ───────────────────────────────────────
+        if global_step % train_params["eval_freq"] == 0:
+            eval_video_dir = str(video_dir / "eval" / f"step_{global_step}")
+            eval_returns = run_eval_episodes(
+                agent=agent,
+                spec=env_spec,
+                seed=seed + global_step,
+                device=device,
+                episodes=train_params["eval_episodes"],
+                video_dir=eval_video_dir,
+            )
+            # Each episode logged individually so TensorBoard can smooth/aggregate
+            for i, ep_ret in enumerate(eval_returns):
+                writer.add_scalar("eval/episode_reward", ep_ret, global_step + i)
+            writer.add_scalar("eval/mean_episode_reward", float(np.mean(eval_returns)), global_step)
+            writer.add_scalar("eval/std_episode_reward",  float(np.std(eval_returns)),  global_step)
+
+        # ── Checkpoint ───────────────────────────────────────────────────────
         if global_step % train_params["checkpoint_freq"] == 0:
             agent.save(ckpt_dir / f"step_{global_step}.pt")
 
+        # ── Video recording ───────────────────────────────────────────────────
         if global_step % train_params["video_freq"] == 0:
             record_videos(
                 agent=agent,
@@ -224,13 +278,14 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
                 num_videos=train_params["num_videos"],
             )
 
+        # ── Episode end ───────────────────────────────────────────────────────
         if done:
             episode_idx += 1
             recent_returns.append(episode_reward)
 
             writer.add_scalar("train/episode_reward", episode_reward, global_step)
             writer.add_scalar("train/episode_length", episode_length, global_step)
-            writer.add_scalar("train/episode_index", episode_idx, global_step)
+            writer.add_scalar("train/episode_index",  episode_idx,    global_step)
 
             obs, _ = env.reset()
             obs_t = torch.tensor(obs, dtype=torch.float32, device=device)
@@ -238,7 +293,7 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
             episode_reward = 0.0
             episode_length = 0
 
-        # Update progress bar every step; postfix refreshes on episode end
+        # ── Progress bar ──────────────────────────────────────────────────────
         pbar.update(1)
         if done and recent_returns:
             mean_ret = float(np.mean(recent_returns))
@@ -251,7 +306,6 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
     pbar.close()
 
     agent.save(ckpt_dir / "final.pt")
-
     env.close()
     writer.close()
 
