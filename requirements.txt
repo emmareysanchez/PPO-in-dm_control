@@ -4,31 +4,31 @@
 numpy
 torch
 torchvision
-
 # =========================
 # RL environments
 # =========================
 gymnasium[mujoco]
 mujoco
-
 # =========================
 # Logging
 # =========================
 tensorboard
-
 # =========================
 # Config handling
 # =========================
 pyyaml
-
 # =========================
 # Image processing (pixel observations)
 # =========================
 opencv-python
 pillow
-
 # =========================
 # Utilities
 # =========================
 tqdm
 matplotlib
+moviepy
+# =========================
+# RL library
+# =========================
+stable-baselines3
