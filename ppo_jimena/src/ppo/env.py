@@ -579,10 +579,9 @@ def _build_env_stack(
     called on the fully-stacked env.
     """
     env = gym.make(id=spec.env_id, render_mode="rgb_array")
-    env = TimeLimit(env=env, max_episode_steps=int(spec.time_limit))
-
     if spec.action_repeat > 1:
         env = ActionRepeat(env=env, repeat=spec.action_repeat)
+    env = TimeLimit(env=env, max_episode_steps=int(spec.time_limit))
 
     env = PixelObservationWrapper(
         env=env,

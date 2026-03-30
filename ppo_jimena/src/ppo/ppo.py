@@ -106,15 +106,9 @@ class PPOAgent:
         # FIX: single shared network instead of two separate ones
         self.ac_net = ActorCriticNet(obs_shape, n_actions, hidden_dim).to(self.device)
 
-        # Two separate optimizers are kept so actor_lr != critic_lr is respected,
-        # but they share the encoder — encoder gradients accumulate from both losses.
-        self.actor_optimizer = torch.optim.Adam(
-            list(self.ac_net.encoder.parameters()) + list(self.ac_net.actor_head.parameters()),
+        self.optimizer = torch.optim.Adam(
+            self.ac_net.parameters(),
             lr=float(actor_lr),
-        )
-        self.critic_optimizer = torch.optim.Adam(
-            list(self.ac_net.encoder.parameters()) + list(self.ac_net.critic_head.parameters()),
-            lr=float(critic_lr),
         )
 
     def act(self, obs: torch.Tensor) -> tuple[int, torch.Tensor, torch.Tensor]:
@@ -175,22 +169,11 @@ class PPOAgent:
 
                 value_loss = F.mse_loss(values, mb_returns)
 
-                # Actor step — also updates encoder via shared params
-                self.actor_optimizer.zero_grad()
-                actor_loss_total = policy_loss - self.entropy_coef * entropy
-                actor_loss_total.backward(retain_graph=True)
+                self.optimizer.zero_grad()
+                total_loss = policy_loss - self.entropy_coef * entropy + self.value_coef * value_loss
+                total_loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.ac_net.parameters(), self.max_grad_norm)
-                self.actor_optimizer.step()
-
-                # Critic step — re-uses encoder features already computed above
-                self.critic_optimizer.zero_grad()
-                # Recompute values after actor step so gradients are fresh
-                _, values_fresh = self.ac_net(mb_obs)
-                value_loss_fresh = F.mse_loss(values_fresh, mb_returns)
-                critic_loss_total = self.value_coef * value_loss_fresh
-                critic_loss_total.backward()
-                torch.nn.utils.clip_grad_norm_(self.ac_net.parameters(), self.max_grad_norm)
-                self.critic_optimizer.step()
+                self.optimizer.step()
 
                 policy_losses.append(float(policy_loss.item()))
                 value_losses.append(float(value_loss.item()))
@@ -203,14 +186,11 @@ class PPOAgent:
         }
 
     def save(self, path: str | bytes | "os.PathLike[str]") -> None:
-        torch.save(
-            {
-                "ac_net": self.ac_net.state_dict(),
-                "actor_optimizer": self.actor_optimizer.state_dict(),
-                "critic_optimizer": self.critic_optimizer.state_dict(),
-            },
-            path,
-        )
+        torch.save({
+            "ac_net": self.ac_net.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+        }, path)
+
 
     def load(self, path: str | bytes | "os.PathLike[str]", map_location: torch.device | str | None = None) -> None:
         ckpt = torch.load(path, map_location=map_location or self.device)
@@ -233,7 +213,5 @@ class PPOAgent:
                     merged[k.replace("head.", "critic_head.")] = v
             self.ac_net.load_state_dict(merged, strict=False)
 
-        if "actor_optimizer" in ckpt:
-            self.actor_optimizer.load_state_dict(ckpt["actor_optimizer"])
-        if "critic_optimizer" in ckpt:
-            self.critic_optimizer.load_state_dict(ckpt["critic_optimizer"])
+        if "optimizer" in ckpt:
+            self.optimizer.load_state_dict(ckpt["optimizer"])
