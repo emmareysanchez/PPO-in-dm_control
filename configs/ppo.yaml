@@ -124,7 +124,7 @@ environment:
   action_repeat: 2
   time_limit: 1000
 
-action_prototypes:
+  action_prototypes:
   # hip balance
   - [0.5, 0.0, 0.0, -0.5, 0.0, 0.0]
   - [-0.5, 0.0, 0.0, 0.5, 0.0, 0.0]
