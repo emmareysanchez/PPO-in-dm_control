@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-
 import argparse
 import random
 import time
 from pathlib import Path
 from typing import Any
-import sys
 
 import numpy as np
 import torch
@@ -17,9 +15,6 @@ from ppo_jimena.src.ppo.buffer import RolloutBuffer
 from ppo_jimena.src.ppo.env import EnvSpec, make_eval_env, make_train_env
 from ppo_jimena.src.ppo.ppo import PPOAgent
 
-root_path = str(Path(__file__).parent.parent.parent.parent)
-if root_path not in sys.path:
-    sys.path.append(root_path)
 
 def load_yaml(path: str) -> dict[str, Any]:
     with open(path, encoding="utf-8") as f:
