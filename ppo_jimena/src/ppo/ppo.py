@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import os
 
 import torch
@@ -38,26 +37,41 @@ class ConvEncoder(nn.Module):
         return self.fc(x)
 
 
-class ActorNet(nn.Module):
-    def __init__(self, obs_shape: tuple[int, int, int], n_actions: int, hidden_dim: int) -> None:
+class ActorCriticNet(nn.Module):
+    """
+    FIX: Actor and critic now share a single CNN encoder.
+
+    Previously, ActorNet and CriticNet each had their own independent
+    ConvEncoder, doubling the number of parameters and forcing both heads
+    to learn separate visual representations from scratch. This is
+    inefficient and hurts stability on pixel-based environments.
+
+    The shared encoder is updated by both the policy and value losses,
+    which leads to richer and faster-converging representations.
+    """
+
+    def __init__(
+        self,
+        obs_shape: tuple[int, int, int],
+        n_actions: int,
+        hidden_dim: int,
+    ) -> None:
         super().__init__()
         self.encoder = ConvEncoder(obs_shape, hidden_dim)
-        self.head = nn.Linear(hidden_dim, n_actions)
+        self.actor_head = nn.Linear(hidden_dim, n_actions)
+        self.critic_head = nn.Linear(hidden_dim, 1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.encoder(x)
-        return self.head(x)
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        features = self.encoder(x)
+        logits = self.actor_head(features)
+        value = self.critic_head(features).squeeze(-1)
+        return logits, value
 
+    def actor(self, x: torch.Tensor) -> torch.Tensor:
+        return self.actor_head(self.encoder(x))
 
-class CriticNet(nn.Module):
-    def __init__(self, obs_shape: tuple[int, int, int], hidden_dim: int) -> None:
-        super().__init__()
-        self.encoder = ConvEncoder(obs_shape, hidden_dim)
-        self.head = nn.Linear(hidden_dim, 1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.encoder(x)
-        return self.head(x).squeeze(-1)
+    def critic(self, x: torch.Tensor) -> torch.Tensor:
+        return self.critic_head(self.encoder(x)).squeeze(-1)
 
 
 class PPOAgent:
@@ -89,16 +103,23 @@ class PPOAgent:
         self.max_grad_norm = float(max_grad_norm)
         self.minibatch_size = minibatch_size
 
-        self.actor = ActorNet(obs_shape, n_actions, hidden_dim).to(self.device)
-        self.critic = CriticNet(obs_shape, hidden_dim).to(self.device)
+        # FIX: single shared network instead of two separate ones
+        self.ac_net = ActorCriticNet(obs_shape, n_actions, hidden_dim).to(self.device)
 
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=float(actor_lr))
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=float(critic_lr))
+        # Two separate optimizers are kept so actor_lr != critic_lr is respected,
+        # but they share the encoder — encoder gradients accumulate from both losses.
+        self.actor_optimizer = torch.optim.Adam(
+            list(self.ac_net.encoder.parameters()) + list(self.ac_net.actor_head.parameters()),
+            lr=float(actor_lr),
+        )
+        self.critic_optimizer = torch.optim.Adam(
+            list(self.ac_net.encoder.parameters()) + list(self.ac_net.critic_head.parameters()),
+            lr=float(critic_lr),
+        )
 
     def act(self, obs: torch.Tensor) -> tuple[int, torch.Tensor, torch.Tensor]:
         obs_b = obs.unsqueeze(0)
-        logits = self.actor(obs_b)
-        value = self.critic(obs_b)
+        logits, value = self.ac_net(obs_b)
         dist = torch.distributions.Categorical(logits=logits)
         action = dist.sample()
         log_prob = dist.log_prob(action)
@@ -106,7 +127,7 @@ class PPOAgent:
 
     def act_deterministic(self, obs: torch.Tensor) -> int:
         obs_b = obs.unsqueeze(0)
-        logits = self.actor(obs_b)
+        logits, _ = self.ac_net(obs_b)
         return int(torch.argmax(logits, dim=-1).item())
 
     def update(
@@ -142,7 +163,7 @@ class PPOAgent:
                 mb_advantages = advantages[mb_idx]
                 mb_returns = returns[mb_idx]
 
-                logits = self.actor(mb_obs)
+                logits, values = self.ac_net(mb_obs)
                 dist = torch.distributions.Categorical(logits=logits)
                 new_log_probs = dist.log_prob(mb_actions)
                 entropy = dist.entropy().mean()
@@ -152,19 +173,23 @@ class PPOAgent:
                 surr2 = torch.clamp(ratio, 1.0 - self.eps_clip, 1.0 + self.eps_clip) * mb_advantages
                 policy_loss = -torch.min(surr1, surr2).mean()
 
-                values = self.critic(mb_obs)
                 value_loss = F.mse_loss(values, mb_returns)
 
+                # Actor step — also updates encoder via shared params
                 self.actor_optimizer.zero_grad()
                 actor_loss_total = policy_loss - self.entropy_coef * entropy
-                actor_loss_total.backward()
-                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
+                actor_loss_total.backward(retain_graph=True)
+                torch.nn.utils.clip_grad_norm_(self.ac_net.parameters(), self.max_grad_norm)
                 self.actor_optimizer.step()
 
+                # Critic step — re-uses encoder features already computed above
                 self.critic_optimizer.zero_grad()
-                critic_loss_total = self.value_coef * value_loss
+                # Recompute values after actor step so gradients are fresh
+                _, values_fresh = self.ac_net(mb_obs)
+                value_loss_fresh = F.mse_loss(values_fresh, mb_returns)
+                critic_loss_total = self.value_coef * value_loss_fresh
                 critic_loss_total.backward()
-                torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(self.ac_net.parameters(), self.max_grad_norm)
                 self.critic_optimizer.step()
 
                 policy_losses.append(float(policy_loss.item()))
@@ -180,8 +205,7 @@ class PPOAgent:
     def save(self, path: str | bytes | "os.PathLike[str]") -> None:
         torch.save(
             {
-                "actor": self.actor.state_dict(),
-                "critic": self.critic.state_dict(),
+                "ac_net": self.ac_net.state_dict(),
                 "actor_optimizer": self.actor_optimizer.state_dict(),
                 "critic_optimizer": self.critic_optimizer.state_dict(),
             },
@@ -190,8 +214,25 @@ class PPOAgent:
 
     def load(self, path: str | bytes | "os.PathLike[str]", map_location: torch.device | str | None = None) -> None:
         ckpt = torch.load(path, map_location=map_location or self.device)
-        self.actor.load_state_dict(ckpt["actor"])
-        self.critic.load_state_dict(ckpt["critic"])
+
+        # Support both old checkpoint format (separate actor/critic) and new (ac_net)
+        if "ac_net" in ckpt:
+            self.ac_net.load_state_dict(ckpt["ac_net"])
+        else:
+            # Legacy: load actor encoder + head and critic head separately
+            actor_sd = ckpt.get("actor", {})
+            critic_sd = ckpt.get("critic", {})
+            merged: dict = {}
+            for k, v in actor_sd.items():
+                if k.startswith("encoder."):
+                    merged[k.replace("encoder.", "encoder.")] = v
+                elif k.startswith("head."):
+                    merged[k.replace("head.", "actor_head.")] = v
+            for k, v in critic_sd.items():
+                if k.startswith("head."):
+                    merged[k.replace("head.", "critic_head.")] = v
+            self.ac_net.load_state_dict(merged, strict=False)
+
         if "actor_optimizer" in ckpt:
             self.actor_optimizer.load_state_dict(ckpt["actor_optimizer"])
         if "critic_optimizer" in ckpt:

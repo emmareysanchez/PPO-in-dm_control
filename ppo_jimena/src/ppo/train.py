@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import random
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ import numpy as np
 import torch
 import yaml
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 from ppo_jimena.src.ppo.buffer import RolloutBuffer
 from ppo_jimena.src.ppo.env import EnvSpec, make_eval_env, make_train_env
@@ -167,7 +169,18 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
     episode_length = 0
     episode_idx = 0
 
+    # Rolling window of the last 10 completed episode rewards for the progress bar
+    recent_returns: deque[float] = deque(maxlen=10)
+
     total_steps = train_params["total_steps"]
+
+    pbar = tqdm(
+        total=total_steps,
+        desc="Training",
+        unit="step",
+        dynamic_ncols=True,
+        colour="green",
+    )
 
     for global_step in range(1, total_steps + 1):
         action, log_prob, value = agent.act(obs_t)
@@ -184,7 +197,11 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
 
         if buffer.ptr == buffer.size:
             with torch.no_grad():
-                last_value = torch.tensor(0.0, dtype=torch.float32, device=device) if done else agent.critic(obs_t.unsqueeze(0)).squeeze(0)
+                last_value = (
+                    torch.tensor(0.0, dtype=torch.float32, device=device)
+                    if done
+                    else agent.ac_net.critic(obs_t.unsqueeze(0)).squeeze(0)
+                )
 
             advantages, returns = buffer.compute_returns_advantages(last_value=last_value)
             loss_info = agent.update(buffer=buffer, advantages=advantages, returns=returns)
@@ -209,6 +226,8 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
 
         if done:
             episode_idx += 1
+            recent_returns.append(episode_reward)
+
             writer.add_scalar("train/episode_reward", episode_reward, global_step)
             writer.add_scalar("train/episode_length", episode_length, global_step)
             writer.add_scalar("train/episode_index", episode_idx, global_step)
@@ -218,6 +237,18 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
 
             episode_reward = 0.0
             episode_length = 0
+
+        # Update progress bar every step; postfix refreshes on episode end
+        pbar.update(1)
+        if done and recent_returns:
+            mean_ret = float(np.mean(recent_returns))
+            pbar.set_postfix(
+                ep=episode_idx,
+                ret=f"{mean_ret:.1f}",
+                best=f"{max(recent_returns):.1f}",
+            )
+
+    pbar.close()
 
     agent.save(ckpt_dir / "final.pt")
 

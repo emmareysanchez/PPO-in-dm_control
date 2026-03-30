@@ -31,6 +31,11 @@ def walker2d_reward(
 ) -> float:
     healthy_reward = float(info.get("reward_survive", 0.0))
     forward_reward = float(info.get("reward_forward", 0.0))
+
+    # FIX: reward_ctrl in Walker2d-v5 is already negative (it is the
+    # negative control cost). Adding it gives the correct sign.
+    # Previously the code did `r -= ctrl_cost`, which subtracted a
+    # negative value and effectively rewarded high torque — wrong.
     ctrl_cost = float(info.get("reward_ctrl", 0.0))
 
     x_velocity = float(info.get("x_velocity", 0.0))
@@ -59,7 +64,7 @@ def walker2d_reward(
     r = 0.0
     r += healthy_reward * 1.2
     r += forward_reward * 0.5
-    r -= ctrl_cost
+    r += ctrl_cost  # FIX: was `r -= ctrl_cost` — ctrl_cost is already negative in Walker2d-v5
 
     # optional shaping
     # r += feet_height_reward

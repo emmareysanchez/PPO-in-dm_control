@@ -566,10 +566,20 @@ class DiscreteActionWrapper(gym.Wrapper):
         return next_obs, float(new_reward), bool(terminated), bool(truncated), info
 
 
-def make_env(spec: EnvSpec, seed: int) -> gym.Env:
+def _build_env_stack(
+    spec: EnvSpec,
+    seed: int,
+    reward_fn: RewardFn | None,
+) -> gym.Env:
+    """
+    Builds the full wrapper stack and seeds the env correctly at the end.
+
+    FIX: previously seed was set on the bare env before wrappers were applied,
+    so the final wrapped env was never properly seeded. Now reset(seed=) is
+    called on the fully-stacked env.
+    """
     env = gym.make(id=spec.env_id, render_mode="rgb_array")
     env = TimeLimit(env=env, max_episode_steps=int(spec.time_limit))
-    env.reset(seed=int(seed))
 
     if spec.action_repeat > 1:
         env = ActionRepeat(env=env, repeat=spec.action_repeat)
@@ -593,23 +603,32 @@ def make_env(spec: EnvSpec, seed: int) -> gym.Env:
     env = DiscreteActionWrapper(
         env=env,
         prototypes=prototypes,
-        reward_fn=walker2d_reward,
+        reward_fn=reward_fn,
     )
 
     if spec.frame_stack > 1:
         env = FrameStack(env=env, k=spec.frame_stack)
 
+    # FIX: seed applied here, on the fully-wrapped env
+    env.reset(seed=int(seed))
+
     return env
 
 
 def make_train_env(spec: EnvSpec, seed: int) -> gym.Env:
-    return make_env(spec=spec, seed=seed)
+    return _build_env_stack(spec=spec, seed=seed, reward_fn=walker2d_reward)
 
 
 def make_eval_env(spec: EnvSpec, seed: int, video_dir: str) -> gym.Env:
-    env = gym.make(id=spec.env_id, render_mode="rgb_array")
-    env = TimeLimit(env=env, max_episode_steps=int(spec.time_limit))
-    env.reset(seed=int(seed))
+    """
+    FIX: RecordVideo is now applied at the outermost layer so it captures
+    the final rendered frames correctly, after all wrappers are in place.
+    Previously it was inserted in the middle of the stack (before
+    PixelObservationWrapper), which caused it to record the raw MuJoCo
+    render instead of the processed pixel observations, and could crash
+    depending on gymnasium version.
+    """
+    env = _build_env_stack(spec=spec, seed=seed, reward_fn=walker2d_reward)
 
     env = RecordVideo(
         env=env,
@@ -618,33 +637,5 @@ def make_eval_env(spec: EnvSpec, seed: int, video_dir: str) -> gym.Env:
         name_prefix="eval",
         disable_logger=True,
     )
-
-    if spec.action_repeat > 1:
-        env = ActionRepeat(env=env, repeat=spec.action_repeat)
-
-    env = PixelObservationWrapper(
-        env=env,
-        height=int(spec.obs_h),
-        width=int(spec.obs_w),
-        grayscale=bool(spec.grayscale),
-    )
-
-    prototypes = np.array(spec.action_prototypes, dtype=np.float32)
-    cont_dim = int(env.action_space.shape[0])
-
-    if prototypes.shape[1] != cont_dim:
-        raise ValueError(
-            "action_prototypes dim mismatch: "
-            f"got {prototypes.shape[1]} but env action dim is {cont_dim}"
-        )
-
-    env = DiscreteActionWrapper(
-        env=env,
-        prototypes=prototypes,
-        reward_fn=walker2d_reward,
-    )
-
-    if spec.frame_stack > 1:
-        env = FrameStack(env=env, k=spec.frame_stack)
 
     return env

@@ -98,7 +98,7 @@ def main(config_path: str, ckpt_path: str, episodes: int = 5) -> None:
 
     returns: list[float] = []
 
-    for _ in range(int(episodes)):
+    for ep in range(int(episodes)):
         obs, _ = env.reset()
         done = False
         total = 0.0
@@ -111,9 +111,10 @@ def main(config_path: str, ckpt_path: str, episodes: int = 5) -> None:
             total += float(r)
 
         returns.append(total)
+        print(f"  episode {ep + 1}/{int(episodes)}  return={total:.3f}")
 
     print(
-        f"episodes={int(episodes)} "
+        f"\nepisodes={int(episodes)} "
         f"mean_return={float(np.mean(returns)):.3f} "
         f"std_return={float(np.std(returns)):.3f}"
     )
