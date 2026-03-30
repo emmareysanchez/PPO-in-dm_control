@@ -9,7 +9,7 @@ import numpy as np
 from gymnasium import spaces
 from gymnasium.wrappers import RecordVideo, TimeLimit
 
-from src.ppo.reward import walker2d_reward
+from ppo_jimena.src.ppo.reward import walker2d_reward
 
 
 CROPS: tuple[float, float, float, float] = (0.25, 0.05, 0.1, 0.1)

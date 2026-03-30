@@ -8,8 +8,8 @@ import numpy as np
 import torch
 import yaml
 
-from src.ppo.env import EnvSpec, make_eval_env
-from src.ppo.ppo import PPOAgent
+from ppo_jimena.src.ppo.env import EnvSpec, make_eval_env
+from ppo_jimena.src.ppo.ppo import PPOAgent
 
 
 def load_yaml(path: str) -> dict[str, Any]:

@@ -11,9 +11,9 @@ import torch
 import yaml
 from torch.utils.tensorboard import SummaryWriter
 
-from src.ppo.buffer import RolloutBuffer
-from src.ppo.env import EnvSpec, make_eval_env, make_train_env
-from src.ppo.ppo import PPOAgent
+from ppo_jimena.src.ppo.buffer import RolloutBuffer
+from ppo_jimena.src.ppo.env import EnvSpec, make_eval_env, make_train_env
+from ppo_jimena.src.ppo.ppo import PPOAgent
 
 
 def load_yaml(path: str) -> dict[str, Any]:
