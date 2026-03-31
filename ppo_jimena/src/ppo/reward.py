@@ -6,7 +6,7 @@ import numpy as np
 
 def walker2d_reward(
     obs: np.ndarray,
-    action: int,
+    action: np.ndarray,
     next_obs: np.ndarray,
     terminated: bool,
     truncated: bool,

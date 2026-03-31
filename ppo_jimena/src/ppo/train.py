@@ -44,7 +44,7 @@ def resolve_env_spec(cfg: dict[str, Any]) -> EnvSpec:
             frame_stack=int(e["frame_stack"]),
             action_repeat=int(e["action_repeat"]),
             time_limit=int(e["time_limit"]),
-            action_prototypes=e["action_prototypes"],
+            action_prototypes=e.get("action_prototypes"),
             obs_h=int(e.get("obs_h", 84)),
             obs_w=int(e.get("obs_w", 84)),
             grayscale=bool(e.get("grayscale", False)),
@@ -63,7 +63,7 @@ def resolve_env_spec(cfg: dict[str, Any]) -> EnvSpec:
         frame_stack=int(e["frame_stack"]),
         action_repeat=int(e["action_repeat"]),
         time_limit=int(e.get("time_limit", 500)),
-        action_prototypes=e["action_prototypes"],
+        action_prototypes=e.get("action_prototypes"),
         obs_h=int(e.get("obs_h", e.get("observation_height", 84))),
         obs_w=int(e.get("obs_w", e.get("observation_width",  84))),
         grayscale=bool(e.get("grayscale", False)),
@@ -219,7 +219,7 @@ class MasterCallback(BaseCallback):
                 total = 0.0
                 while not done:
                     action, _ = self.model.predict(obs, deterministic=True)
-                    obs, r, terminated, truncated, _ = env.step(int(action))
+                    obs, r, terminated, truncated, _ = env.step(action)
                     done = bool(terminated or truncated)
                     total += float(r)
                 returns.append(total)
@@ -234,7 +234,7 @@ class MasterCallback(BaseCallback):
                 done = False
                 while not done:
                     action, _ = self.model.predict(obs, deterministic=True)
-                    obs, _r, terminated, truncated, _ = env.step(int(action))
+                    obs, _r, terminated, truncated, _ = env.step(action)
                     done = bool(terminated or truncated)
         env.close()
 

@@ -12,7 +12,7 @@ from gymnasium.wrappers import RecordVideo, TimeLimit
 from ppo_jimena.src.ppo.reward import walker2d_reward
 
 
-CROPS: tuple[float, float, float, float] = (0.25, 0.05, 0.1, 0.1)
+CROPS: tuple[float, float, float, float] = (0.15, 0.05, 0.05, 0.05)
 
 
 # ── MuJoCo introspection helpers ─────────────────────────────────────────────
@@ -298,7 +298,7 @@ class EnvSpec:
     frame_stack: int
     action_repeat: int
     time_limit: int
-    action_prototypes: list[list[float]]
+    action_prototypes: list[list[float]] | None = None
     obs_h: int
     obs_w: int
     grayscale: bool = False
@@ -328,43 +328,10 @@ class ActionRepeatWrapper(gym.Wrapper):
 
 
 RewardFn = Callable[
-    [np.ndarray, int, np.ndarray, bool, bool, dict, float, gym.Env],
+    [np.ndarray, np.ndarray, np.ndarray, bool, bool, dict, float, gym.Env],
     float,
 ]
 
-
-class DiscreteActionWrapper(gym.Wrapper):
-    """Maps a discrete index to a continuous prototype vector."""
-
-    def __init__(
-        self,
-        env: gym.Env,
-        prototypes: np.ndarray,
-        reward_fn: RewardFn | None = None,
-    ) -> None:
-        super().__init__(env=env)
-        self.prototypes = prototypes.astype(np.float32)
-        self.action_space = spaces.Discrete(n=len(self.prototypes))
-        self._reward_fn = reward_fn
-        self._last_obs: np.ndarray | None = None
-
-    def reset(self, **kwargs) -> tuple[np.ndarray, dict]:
-        obs, info = self.env.reset(**kwargs)
-        self._last_obs = obs
-        return obs, info
-
-    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
-        if self._last_obs is None:
-            raise RuntimeError("reset() must be called before step().")
-        cont_action = self.prototypes[int(action)]
-        next_obs, env_reward, terminated, truncated, info = self.env.step(cont_action)
-        if self._reward_fn is not None:
-            env_reward = float(self._reward_fn(
-                self._last_obs, int(action), next_obs,
-                bool(terminated), bool(truncated), info, float(env_reward), self.env,
-            ))
-        self._last_obs = next_obs
-        return next_obs, float(env_reward), bool(terminated), bool(truncated), info
 
 
 class PixelObservationWrapper(gym.Wrapper):
@@ -383,12 +350,14 @@ class PixelObservationWrapper(gym.Wrapper):
         width: int = 84,
         grayscale: bool = False,
         action_repeat: int = 1,
+        reward_fn: RewardFn | None = None,
     ) -> None:
         super().__init__(env=env)
         self.height        = int(height)
         self.width         = int(width)
         self.grayscale     = bool(grayscale)
         self.action_repeat = int(action_repeat)
+        self._reward_fn     = reward_fn
 
         c_out = 1 if self.grayscale else 3
         self.observation_space = spaces.Box(
@@ -429,6 +398,7 @@ class PixelObservationWrapper(gym.Wrapper):
         raw_info["terminated"] = bool(terminated)
         raw_info["truncated"]  = bool(truncated)
 
+        prev_obs = self._get_obs()
         info, self._prev_head_xy, self._prev_body_xy = _build_info(
             raw_info=raw_info,
             env=self,                        # self.unwrapped used inside
@@ -438,7 +408,19 @@ class PixelObservationWrapper(gym.Wrapper):
             prev_head_xy=self._prev_head_xy,
             prev_body_xy=self._prev_body_xy,
         )
-        return self._get_obs(), float(reward), bool(terminated), bool(truncated), info
+        next_obs = self._get_obs()
+        if self._reward_fn is not None:
+            reward = float(self._reward_fn(
+                prev_obs,
+                np.asarray(action, dtype=np.float32),
+                next_obs,
+                bool(terminated),
+                bool(truncated),
+                info,
+                float(reward),
+                self.env,
+            ))
+        return next_obs, float(reward), bool(terminated), bool(truncated), info
 
 
 class FrameStack(gym.Wrapper):
@@ -479,7 +461,6 @@ def _build_env_stack(spec: EnvSpec, seed: int, reward_fn: RewardFn | None) -> gy
     Wrapper order:
       gym.make
         → ActionRepeatWrapper    (continuous actions repeated in the sim)
-        → DiscreteActionWrapper  (int → continuous vector)
         → PixelObservationWrapper
         → FrameStack
         → TimeLimit              (counts agent steps, not sim steps)
@@ -489,13 +470,6 @@ def _build_env_stack(spec: EnvSpec, seed: int, reward_fn: RewardFn | None) -> gy
     if spec.action_repeat > 1:
         env = ActionRepeatWrapper(env=env, repeat=spec.action_repeat)
 
-    prototypes = np.array(spec.action_prototypes, dtype=np.float32)
-    cont_dim = int(env.action_space.shape[0])
-    if prototypes.shape[1] != cont_dim:
-        raise ValueError(
-            f"action_prototypes dim mismatch: got {prototypes.shape[1]}, env expects {cont_dim}"
-        )
-    env = DiscreteActionWrapper(env=env, prototypes=prototypes, reward_fn=reward_fn)
 
     env = PixelObservationWrapper(
         env=env,
@@ -503,6 +477,7 @@ def _build_env_stack(spec: EnvSpec, seed: int, reward_fn: RewardFn | None) -> gy
         width=int(spec.obs_w),
         grayscale=bool(spec.grayscale),
         action_repeat=int(spec.action_repeat),
+        reward_fn=reward_fn,
     )
 
     if spec.frame_stack > 1:

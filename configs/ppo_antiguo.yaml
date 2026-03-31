@@ -1,0 +1,183 @@
+# # Configuración Práctica 3 - Aprendizaje por Refuerzo Profundo
+# # Control Continuo con Observaciones Visuales (RGB)
+# # Curso 2025/2026
+
+# # ======================================================
+# # CONFIGURACIÓN PRÁCTICA 3 - DRL MUIA (2025/2026)
+# # Control Continuo Discretizado con Observaciones RGB
+# # ======================================================
+
+# experiment:
+#   name: "walker_ppo_visual_discretized"
+#   device: "cuda"  #
+#   seed: 0         #
+
+# environment:
+#   domain: "walker"
+#   task: "walk"
+#   observation_height: 54 
+#   observation_width: 54  
+#   frame_stack: 4         
+#   grayscale: false       
+#   action_repeat: 1       
+  
+#   # Set de acciones de la Práctica 2 (DQN)
+#   # Estructura: [cadera_izq, rodilla_izq, tobillo_izq, cadera_der, rodilla_der, tobillo_der]
+#   action_prototypes:
+
+#   # 0) noop
+#   - [+0, +0, +0, +0, +0, +0]
+
+#   # hip
+#   - [+0, +0, +0, +1, +0, +0]
+#   - [+0, +0, +0, -1, +0, +0]
+#   - [+1, +0, +0, +0, +0, +0]
+#   - [-1, +0, +0, +0, +0, +0]
+
+#   # knee
+#   - [+0, +0, +0, +0, +1, +0]
+#   - [+0, +0, +0, +0, -1, +0]
+#   - [+0, +1, +0, +0, +0, +0]
+#   - [+0, -1, +0, +0, +0, +0]
+
+#   # ankle
+#   - [+0, +0, +0, +0, +0, +1]
+#   - [+0, +0, +0, +0, +0, -1]
+#   - [+0, +0, +1, +0, +0, +0]
+#   - [+0, +0, -1, +0, +0, +0]
+
+#   # tobillo + rodilla
+#   - [+0, +0, +0, +0, +1, -1]   # lean-forward correction (moderate)
+#   - [+0, +0, +0, +0, -1, +1]   # lean-back correction (strong)
+#   - [+0, +1, -1, +0, +0, +0]   # lean-forward correction (moderate)p
+#   - [+0, -1, +1, +0, +0, +0]   # lean-back correction (strong)
+
+#   - [+0, +0, +0, +0, +1, +1]
+#   - [+0, +0, +0, +0, -1, -1]
+#   - [+0, +1, +1, +0, +0, +0]
+#   - [+0, -1, -1, +0, +0, +0]
+  
+#   # cadera + rodilla
+#   - [+0, +0, +0, +1, -1, +0]
+#   - [+0, +0, +0, -1, +1, +0]
+#   - [+1, -1, +0, +0, +0, +0]
+#   - [-1, +1, +0, +0, +0, +0]
+
+#   # COORDINACIÓN SIMÉTRICA
+
+#   # coordinación cadera
+#   - [+1, +0, +0, -1, +0, +0]
+#   - [-1, +0, +0, +1, +0, +0]
+
+#   # cadera + rodilla
+#   - [+1, -1, +0, -1, +1, +0]
+#   - [-1, +1, +0, +1, -1, +0]
+
+#   # cadera + rodilla
+#   - [+1, -1, +0, -1, +1, +0]
+#   - [-1, +1, +0, +1, -1, +0]
+
+#   # coordinación tobillos
+#   - [+0, +0, -1, +0, +0, +1]
+#   - [+0, +0, +1, +0, +0, -1]
+
+# architecture:
+#   encoder_type: "cnn"
+#   [cite_start]hidden_dim: 256 # Dimensión de la capa densa tras la CNN [cite: 81]
+
+# [cite_start]ppo: # Parte 1: On-policy [cite: 38]
+#   actor_lr: 5.0e-5  # Basado en tu DQN
+#   critic_lr: 1.0e-4
+#   gamma: 0.99       #
+#   [cite_start]lambd: 0.95       # GAE para estimar ventajas [cite: 44]
+#   [cite_start]k_epochs: 10      # Épocas de optimización por batch [cite: 39]
+#   [cite_start]eps_clip: 0.2     # Clipping de PPO [cite: 41]
+#   [cite_start]entropy_coef: 0.01 # Fomenta la exploración [cite: 16]
+
+# [cite_start]sac: # Parte 2: Off-policy [cite: 45]
+#   actor_lr: 3.0e-4
+#   critic_lr: 3.0e-4
+#   gamma: 0.99
+#   [cite_start]tau: 0.005        # Soft update de redes target [cite: 52]
+#   [cite_start]alpha: 0.2        # Coeficiente de entropía inicial [cite: 47]
+#   [cite_start]auto_tune_alpha: true # Versión SAC v2 [cite: 60]
+#   batch_size: 64    #
+#   buffer_size: 200000 #
+
+# logging:
+#   [cite_start]save_freq: 500    # Frecuencia de guardado de checkpoints [cite: 82]
+#   log_dir: "./results"
+
+experiment:
+  name: walker_ppo_visual_discretized
+  device: cuda
+  seed: 0
+
+environment:
+  env_id: Walker2d-v5
+  obs_h: 64
+  obs_w: 64
+  frame_stack: 4
+  grayscale: false
+  action_repeat: 1
+  time_limit: 1000
+
+  action_prototypes:
+    - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]   # noop
+
+    # hips only
+    - [ 0.6,  0.0,  0.0, -0.6,  0.0,  0.0]
+    - [-0.6,  0.0,  0.0,  0.6,  0.0,  0.0]
+    - [ 0.3,  0.0,  0.0, -0.3,  0.0,  0.0]
+    - [-0.3,  0.0,  0.0,  0.3,  0.0,  0.0]
+
+    # left leg only
+    - [ 0.0,  0.5, -0.4,  0.0,  0.0,  0.0]
+    - [ 0.0, -0.5,  0.4,  0.0,  0.0,  0.0]
+    - [ 0.0,  0.3, -0.2,  0.0,  0.0,  0.0]
+    - [ 0.0, -0.3,  0.2,  0.0,  0.0,  0.0]
+
+    # right leg only
+    - [ 0.0,  0.0,  0.0,  0.0,  0.5, -0.4]
+    - [ 0.0,  0.0,  0.0,  0.0, -0.5,  0.4]
+    - [ 0.0,  0.0,  0.0,  0.0,  0.3, -0.2]
+    - [ 0.0,  0.0,  0.0,  0.0, -0.3,  0.2]
+
+    # alternating gait
+    - [ 0.7, -0.5,  0.3, -0.7,  0.5, -0.3]
+    - [-0.7,  0.5, -0.3,  0.7, -0.5,  0.3]
+    - [ 0.4, -0.3,  0.2, -0.4,  0.3, -0.2]
+    - [-0.4,  0.3, -0.2,  0.4, -0.3,  0.2]
+
+    # balance / recover torso
+    - [ 0.2,  0.2, -0.2, -0.2, -0.2,  0.2]
+    - [-0.2, -0.2,  0.2,  0.2,  0.2, -0.2]
+    - [ 0.3,  0.0, -0.2, -0.3,  0.0,  0.2]
+    - [-0.3,  0.0,  0.2,  0.3,  0.0, -0.2]
+
+architecture:
+  hidden_dim: 256
+
+ppo:
+  actor_lr: 1e-4
+  gamma: 0.99
+  lambd: 0.95
+  k_epochs: 10
+  eps_clip: 0.2
+  entropy_coef: 0.01
+  value_coef: 0.5
+  max_grad_norm: 0.5
+  minibatch_size: 256
+
+train:
+  total_steps: 3000000
+  rollout_size: 4096
+  checkpoint_freq: 50000
+  video_freq: 50000
+  num_videos: 4
+  eval_freq: 10000
+  eval_episodes: 5
+
+logging:
+  save_freq: 50000
+  log_dir: runs/ppo
