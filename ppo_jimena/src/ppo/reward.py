@@ -6,7 +6,7 @@ import numpy as np
 
 def walker2d_reward(
     obs: np.ndarray,
-    action: np.ndarray,
+    action,
     next_obs: np.ndarray,
     terminated: bool,
     truncated: bool,
@@ -14,10 +14,15 @@ def walker2d_reward(
     env_reward: float,
     env: gym.Env,
 ) -> float:
-    # Use the environment reward directly: it already sums
-    # reward_survive + reward_forward + reward_ctrl across all
-    # action_repeat substeps, which is what we want.
-    return float(env_reward)
+    reward_forward = float(info.get("reward_forward", 0.0))
+    reward_ctrl = float(info.get("reward_ctrl", 0.0))
+    reward_survive = float(info.get("reward_survive", 0.0))
+
+    return (
+        1.2 * reward_forward
+        + 1.0 * reward_survive
+        + 0.5 * reward_ctrl
+    )
 
 
 walker2d_default_reward = walker2d_reward
