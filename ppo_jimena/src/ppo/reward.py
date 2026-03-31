@@ -14,12 +14,10 @@ def walker2d_reward(
     env_reward: float,
     env: gym.Env,
 ) -> float:
-    # Usamos directamente la recompensa acumulada del entorno, que ya incluye
-    # reward_survive + reward_forward + reward_ctrl sumados sobre todos los
-    # substeps del action_repeat. Recomponerla desde info solo captura el
-    # último substep y sesga el entrenamiento.
+    # Use the environment reward directly: it already sums
+    # reward_survive + reward_forward + reward_ctrl across all
+    # action_repeat substeps, which is what we want.
     return float(env_reward)
 
 
-# alias por compatibilidad
 walker2d_default_reward = walker2d_reward

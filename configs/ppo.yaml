@@ -115,36 +115,27 @@ experiment:
 
 environment:
   env_id: Walker2d-v5
-  domain: walker
-  task: walk
   obs_h: 64
   obs_w: 64
   frame_stack: 4
   grayscale: false
   action_repeat: 2
-  time_limit: 500        # pasos del agente (ActionRepeat se aplica antes de TimeLimit)
+  time_limit: 500
 
   action_prototypes:
-  # noop
-  - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]
-  # zancada coordinada: pierna der adelante, izq atrás
-  - [ 0.8, -0.6,  0.4, -0.8,  0.6, -0.4]
-  - [-0.8,  0.6, -0.4,  0.8, -0.6,  0.4]
-  # cadera simétrica
-  - [ 0.5,  0.0,  0.0, -0.5,  0.0,  0.0]
-  - [-0.5,  0.0,  0.0,  0.5,  0.0,  0.0]
-  # rodilla/tobillo izquierda
-  - [ 0.0,  0.6, -0.5,  0.0,  0.0,  0.0]
-  - [ 0.0, -0.6,  0.5,  0.0,  0.0,  0.0]
-  # rodilla/tobillo derecha
-  - [ 0.0,  0.0,  0.0,  0.0,  0.6, -0.5]
-  - [ 0.0,  0.0,  0.0,  0.0, -0.6,  0.5]
-  # equilibrio lateral
-  - [ 0.3,  0.0, -0.3, -0.3,  0.0,  0.3]
-  - [-0.3,  0.0,  0.3,  0.3,  0.0, -0.3]
+  - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]   # noop
+  - [ 0.8, -0.6,  0.4, -0.8,  0.6, -0.4]   # zancada: der adelante
+  - [-0.8,  0.6, -0.4,  0.8, -0.6,  0.4]   # zancada: izq adelante
+  - [ 0.5,  0.0,  0.0, -0.5,  0.0,  0.0]   # cadera →
+  - [-0.5,  0.0,  0.0,  0.5,  0.0,  0.0]   # cadera ←
+  - [ 0.0,  0.6, -0.5,  0.0,  0.0,  0.0]   # rodilla/tobillo izq +
+  - [ 0.0, -0.6,  0.5,  0.0,  0.0,  0.0]   # rodilla/tobillo izq -
+  - [ 0.0,  0.0,  0.0,  0.0,  0.6, -0.5]   # rodilla/tobillo der +
+  - [ 0.0,  0.0,  0.0,  0.0, -0.6,  0.5]   # rodilla/tobillo der -
+  - [ 0.3,  0.0, -0.3, -0.3,  0.0,  0.3]   # equilibrio →
+  - [-0.3,  0.0,  0.3,  0.3,  0.0, -0.3]   # equilibrio ←
 
 architecture:
-  encoder_type: cnn
   hidden_dim: 256
 
 ppo:
