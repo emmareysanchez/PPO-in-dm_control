@@ -298,10 +298,10 @@ class EnvSpec:
     frame_stack: int
     action_repeat: int
     time_limit: int
-    action_prototypes: list[list[float]] | None = None
     obs_h: int
     obs_w: int
     grayscale: bool = False
+    action_prototypes: list[list[float]] | None = None
 
 
 # ── Wrappers ──────────────────────────────────────────────────────────────────
