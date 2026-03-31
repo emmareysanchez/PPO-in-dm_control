@@ -178,6 +178,14 @@ class MasterCallback(BaseCallback):
                 self.writer.add_scalar("eval/episode_reward", r, t + i)
             self.writer.add_scalar("eval/mean_episode_reward", float(np.mean(returns)), t)
             self.writer.add_scalar("eval/std_episode_reward",  float(np.std(returns)),  t)
+        
+        # ── PPO Losses ──  ← AÑADIR AQUÍ
+        if hasattr(self.model, 'logger') and self.model.logger is not None:
+            for key in ['train/policy_gradient_loss', 'train/value_loss', 
+                        'train/entropy_loss', 'train/approx_kl']:
+                val = self.model.logger.name_to_value.get(key)
+                if val is not None:
+                    self.writer.add_scalar(key, val, t)
 
         # ── Progress bar ──
         self._pbar.update(1)
@@ -278,7 +286,7 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
             "net_arch": [],
             "features_extractor_kwargs": {"features_dim": hidden_dim},
         },
-        tensorboard_log=str(run_dir),
+        tensorboard_log=None,
         device=device,
         seed=seed,
         verbose=1,
