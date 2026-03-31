@@ -303,7 +303,7 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
         total_timesteps=train_params["total_steps"],
         callback=callback,
         reset_num_timesteps=True,
-        tb_log_name="sb3",
+        tb_log_name=".",
     )
 
     model.save(str(ckpt_dir / "final"))
