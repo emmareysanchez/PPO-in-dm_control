@@ -572,24 +572,30 @@ def _build_env_stack(
     reward_fn: RewardFn | None,
 ) -> gym.Env:
     """
-    Builds the full wrapper stack and seeds the env correctly at the end.
+    Correct wrapper order:
 
-    FIX: previously seed was set on the bare env before wrappers were applied,
-    so the final wrapped env was never properly seeded. Now reset(seed=) is
-    called on the fully-stacked env.
+      gym.make
+        → ActionRepeat          (repite acciones continuas en el sim nativo)
+        → DiscreteActionWrapper (convierte entero → array continuo ANTES de píxeles)
+        → PixelObservationWrapper (renderiza píxeles; ya recibe acciones discretas)
+        → FrameStack
+        → TimeLimit             (cuenta pasos del agente, no del simulador)
+
+    El error anterior ponía PixelObservationWrapper y DiscreteActionWrapper en
+    orden inverso: PixelObs llamaba a step() con un entero, que bajaba hasta
+    MuJoCo sin convertirse nunca a array continuo. El simulador recibía un
+    escalar donde esperaba un vector de 6 dimensiones, causando comportamiento
+    indefinido (caída inmediata, sin señal de aprendizaje).
     """
     env = gym.make(id=spec.env_id, render_mode="rgb_array")
+
+    # 1. ActionRepeat — opera sobre el espacio continuo nativo
     if spec.action_repeat > 1:
         env = ActionRepeat(env=env, repeat=spec.action_repeat)
-    env = TimeLimit(env=env, max_episode_steps=int(spec.time_limit))
 
-    env = PixelObservationWrapper(
-        env=env,
-        height=int(spec.obs_h),
-        width=int(spec.obs_w),
-        grayscale=bool(spec.grayscale),
-    )
-
+    # 2. DiscreteActionWrapper — convierte entero → vector continuo
+    #    Debe ir ANTES de PixelObservationWrapper para que la conversión
+    #    llegue al simulador correctamente.
     prototypes = np.array(spec.action_prototypes, dtype=np.float32)
     cont_dim = int(env.action_space.shape[0])
 
@@ -605,10 +611,22 @@ def _build_env_stack(
         reward_fn=reward_fn,
     )
 
+    # 3. PixelObservationWrapper — renderiza y redimensiona frames
+    env = PixelObservationWrapper(
+        env=env,
+        height=int(spec.obs_h),
+        width=int(spec.obs_w),
+        grayscale=bool(spec.grayscale),
+    )
+
+    # 4. FrameStack — apila k frames consecutivos
     if spec.frame_stack > 1:
         env = FrameStack(env=env, k=spec.frame_stack)
 
-    # FIX: seed applied here, on the fully-wrapped env
+    # 5. TimeLimit — aquí cuenta pasos del agente (post action_repeat)
+    env = TimeLimit(env=env, max_episode_steps=int(spec.time_limit))
+
+    # Seed sobre el stack completo
     env.reset(seed=int(seed))
 
     return env
