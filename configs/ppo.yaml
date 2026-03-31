@@ -5,10 +5,10 @@ experiment:
 
 environment:
   env_id: Walker2d-v5
-  obs_h: 64
-  obs_w: 64
+  obs_h: 84
+  obs_w: 84
   frame_stack: 4
-  grayscale: false
+  grayscale: true
   action_repeat: 1
   time_limit: 1000
 
@@ -16,7 +16,7 @@ architecture:
   hidden_dim: 256
 
 ppo:
-  actor_lr: 1e-4
+  actor_lr: 3e-4
   gamma: 0.99
   lambd: 0.95
   k_epochs: 10
@@ -28,7 +28,7 @@ ppo:
 
 train:
   total_steps: 3000000
-  rollout_size: 4096
+  rollout_size: 2048
   checkpoint_freq: 50000
   video_freq: 50000
   num_videos: 4

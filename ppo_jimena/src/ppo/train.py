@@ -159,21 +159,6 @@ class MasterCallback(BaseCallback):
             self._ep_reward = 0.0
             self._ep_length = 0
 
-        # ── Losses — read from SB3 internal logger after each update ──
-        # SB3 stores them in logger.name_to_value; they are non-None only
-        # in the step that immediately follows a PPO update.
-        name_to_val = getattr(self.model.logger, "name_to_value", {})
-        for sb3_key, tb_key in (
-            ("train/policy_gradient_loss", "train/policy_loss"),
-            ("train/value_loss",           "train/value_loss"),
-            ("train/entropy_loss",         "train/entropy"),
-            ("train/approx_kl",            "train/approx_kl"),
-            ("train/clip_fraction",        "train/clip_fraction"),
-        ):
-            val = name_to_val.get(sb3_key)
-            if val is not None:
-                self.writer.add_scalar(tb_key, float(val), t)
-
         # ── Checkpoint ──
         if t % self.checkpoint_freq == 0:
             path = str(self.ckpt_dir / f"step_{t}")
@@ -293,9 +278,10 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
             "net_arch": [],
             "features_extractor_kwargs": {"features_dim": hidden_dim},
         },
+        tensorboard_log=str(run_dir),
         device=device,
         seed=seed,
-        verbose=0,
+        verbose=1,
     )
 
     callback = MasterCallback(
@@ -317,6 +303,7 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
         total_timesteps=train_params["total_steps"],
         callback=callback,
         reset_num_timesteps=True,
+        tb_log_name="sb3",
     )
 
     model.save(str(ckpt_dir / "final"))

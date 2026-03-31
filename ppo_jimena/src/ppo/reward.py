@@ -21,7 +21,7 @@ def walker2d_reward(
     return (
         1.2 * reward_forward
         + 1.0 * reward_survive
-        + 0.5 * reward_ctrl
+        + 1.0 * reward_ctrl
     )
 
 
