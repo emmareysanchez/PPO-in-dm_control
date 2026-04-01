@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 import random
 import time
 from collections import deque
 from pathlib import Path
 from typing import Any
-import os
-os.environ["MUJOCO_GL"] = "egl" 
+
+os.environ["MUJOCO_GL"] = "egl"
 
 import numpy as np
 import torch
@@ -18,6 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from ppo_jimena.src.ppo.env import EnvSpec, make_eval_env, make_train_env
+
 
 # ── YAML helpers ──────────────────────────────────────────────────────────────
 
@@ -50,15 +52,17 @@ def resolve_env_spec(cfg: dict[str, Any]) -> EnvSpec:
             obs_w=int(e.get("obs_w", 84)),
             grayscale=bool(e.get("grayscale", False)),
         )
+
     e = cfg["environment"]
     env_id = e.get("env_id")
     if env_id is None:
         domain = str(e.get("domain", "")).lower()
-        task   = str(e.get("task",   "")).lower()
+        task = str(e.get("task", "")).lower()
         if domain == "walker" and task == "walk":
             env_id = "Walker2d-v5"
         else:
             raise ValueError("YAML must define environment.env_id or a supported domain/task pair.")
+
     return EnvSpec(
         env_id=str(env_id),
         frame_stack=int(e["frame_stack"]),
@@ -66,7 +70,7 @@ def resolve_env_spec(cfg: dict[str, Any]) -> EnvSpec:
         time_limit=int(e.get("time_limit", 500)),
         action_prototypes=e.get("action_prototypes"),
         obs_h=int(e.get("obs_h", e.get("observation_height", 84))),
-        obs_w=int(e.get("obs_w", e.get("observation_width",  84))),
+        obs_w=int(e.get("obs_w", e.get("observation_width", 84))),
         grayscale=bool(e.get("grayscale", False)),
     )
 
@@ -74,14 +78,16 @@ def resolve_env_spec(cfg: dict[str, Any]) -> EnvSpec:
 def resolve_train_params(cfg: dict[str, Any]) -> dict[str, Any]:
     t = cfg.get("train", {})
     l = cfg.get("logging", {})
+    e = cfg.get("environment", cfg.get("env", {}))
     return {
-        "total_steps":     int(t.get("total_steps",     2_000_000)),
-        "rollout_size":    int(t.get("rollout_size",     2_048)),
+        "total_steps": int(t.get("total_steps", 2_000_000)),
+        "rollout_size": int(t.get("rollout_size", 2_048)),
         "checkpoint_freq": int(t.get("checkpoint_freq", l.get("save_freq", 50_000))),
-        "video_freq":      int(t.get("video_freq",      l.get("save_freq", 50_000))),
-        "num_videos":      int(t.get("num_videos",      4)),
-        "eval_freq":       int(t.get("eval_freq",       10_000)),
-        "eval_episodes":   int(t.get("eval_episodes",   5)),
+        "video_freq": int(t.get("video_freq", l.get("save_freq", 50_000))),
+        "num_videos": int(t.get("num_videos", 4)),
+        "eval_freq": int(t.get("eval_freq", 10_000)),
+        "eval_episodes": int(t.get("eval_episodes", 5)),
+        "n_envs": int(e.get("n_envs", 1)),
     }
 
 
@@ -94,10 +100,6 @@ class MasterCallback(BaseCallback):
       - Checkpoints
       - Video recording
       - tqdm progress bar
-
-    Uses a dedicated SummaryWriter so logging is not subject to SB3's
-    internal logger timing, which only flushes losses every n_steps.
-    Losses are read from model.logger after each PPO update (when they exist).
     """
 
     def __init__(
@@ -116,21 +118,21 @@ class MasterCallback(BaseCallback):
         device: str,
     ) -> None:
         super().__init__(verbose=0)
-        self.writer          = writer
-        self.env_spec        = env_spec
-        self.seed            = seed
-        self.video_dir       = video_dir
-        self.ckpt_dir        = ckpt_dir
+        self.writer = writer
+        self.env_spec = env_spec
+        self.seed = seed
+        self.video_dir = video_dir
+        self.ckpt_dir = ckpt_dir
         self.checkpoint_freq = int(checkpoint_freq)
-        self.video_freq      = int(video_freq)
-        self.num_videos      = int(num_videos)
-        self.eval_freq       = int(eval_freq)
-        self.eval_episodes   = int(eval_episodes)
-        self.device          = device
+        self.video_freq = int(video_freq)
+        self.num_videos = int(num_videos)
+        self.eval_freq = int(eval_freq)
+        self.eval_episodes = int(eval_episodes)
+        self.device = device
 
-        self._ep_reward  = 0.0
-        self._ep_length  = 0
-        self._ep_idx     = 0
+        self._ep_rewards: list[float] | None = None
+        self._ep_lengths: list[int] | None = None
+        self._ep_idx = 0
         self._recent: deque[float] = deque(maxlen=10)
 
         self._pbar = tqdm(
@@ -144,53 +146,63 @@ class MasterCallback(BaseCallback):
     def _on_step(self) -> bool:
         t = self.num_timesteps
 
-        reward = float(self.locals["rewards"][0])
-        done   = bool(self.locals["dones"][0])
+        rewards = self.locals["rewards"]
+        dones = self.locals["dones"]
+        n_envs = len(rewards)
 
-        self._ep_reward += reward
-        self._ep_length += 1
+        if self._ep_rewards is None:
+            self._ep_rewards = [0.0 for _ in range(n_envs)]
+            self._ep_lengths = [0 for _ in range(n_envs)]
 
-        # ── Episode end ──
-        if done:
-            self._ep_idx += 1
-            self._recent.append(self._ep_reward)
-            self.writer.add_scalar("train/episode_reward", self._ep_reward, t)
-            self.writer.add_scalar("train/episode_length", self._ep_length, t)
-            self.writer.add_scalar("train/episode_index",  self._ep_idx,    t)
-            self._ep_reward = 0.0
-            self._ep_length = 0
+        for i in range(n_envs):
+            self._ep_rewards[i] += float(rewards[i])
+            self._ep_lengths[i] += 1
 
-        # ── Checkpoint ──
+            if bool(dones[i]):
+                self._ep_idx += 1
+                ep_reward = self._ep_rewards[i]
+                ep_length = self._ep_lengths[i]
+
+                self._recent.append(ep_reward)
+                self.writer.add_scalar("train/episode_reward", ep_reward, t)
+                self.writer.add_scalar("train/episode_length", ep_length, t)
+                self.writer.add_scalar("train/episode_index", self._ep_idx, t)
+
+                self._ep_rewards[i] = 0.0
+                self._ep_lengths[i] = 0
+
         if t % self.checkpoint_freq == 0:
             path = str(self.ckpt_dir / f"step_{t}")
             self.model.save(path)
 
-        # ── Video ──
         if t % self.video_freq == 0:
             step_dir = self.video_dir / f"step_{t}"
             step_dir.mkdir(parents=True, exist_ok=True)
             self._record_videos(str(step_dir), seed_offset=t)
 
-        # ── Eval ──
         if t % self.eval_freq == 0:
             eval_video_dir = str(self.video_dir / "eval" / f"step_{t}")
             returns = self._run_eval(eval_video_dir, seed_offset=t)
             for i, r in enumerate(returns):
                 self.writer.add_scalar("eval/episode_reward", r, t + i)
             self.writer.add_scalar("eval/mean_episode_reward", float(np.mean(returns)), t)
-            self.writer.add_scalar("eval/std_episode_reward",  float(np.std(returns)),  t)
-        
-        # ── PPO Losses ──  ← AÑADIR AQUÍ
-        if hasattr(self.model, 'logger') and self.model.logger is not None:
-            for key in ['train/policy_gradient_loss', 'train/value_loss', 
-                        'train/entropy_loss', 'train/approx_kl']:
+            self.writer.add_scalar("eval/std_episode_reward", float(np.std(returns)), t)
+
+        if hasattr(self.model, "logger") and self.model.logger is not None:
+            for key in [
+                "train/policy_gradient_loss",
+                "train/value_loss",
+                "train/entropy_loss",
+                "train/approx_kl",
+            ]:
                 val = self.model.logger.name_to_value.get(key)
                 if val is not None:
                     self.writer.add_scalar(key, val, t)
 
-        # ── Progress bar ──
-        self._pbar.update(1)
-        if done and self._recent:
+        self._pbar.n = min(t, self._pbar.total)
+        self._pbar.refresh()
+
+        if self._recent:
             self._pbar.set_postfix(
                 ep=self._ep_idx,
                 ret=f"{float(np.mean(self._recent)):.1f}",
@@ -238,9 +250,9 @@ class MasterCallback(BaseCallback):
 def main(config_path: str = "configs/ppo.yaml") -> None:
     cfg = load_yaml(config_path)
 
-    device       = resolve_device(cfg)
-    seed         = resolve_seed(cfg)
-    env_spec     = resolve_env_spec(cfg)
+    device = resolve_device(cfg)
+    seed = resolve_seed(cfg)
+    env_spec = resolve_env_spec(cfg)
     train_params = resolve_train_params(cfg)
 
     random.seed(seed)
@@ -249,26 +261,26 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-    run_name  = time.strftime("%Y-%m-%d_%H-%M-%S")
-    run_dir   = Path("runs")        / "ppo" / run_name
-    video_dir = Path("videos")      / "ppo" / run_name
-    ckpt_dir  = Path("checkpoints") / "ppo" / run_name
+    run_name = time.strftime("%Y-%m-%d_%H-%M-%S")
+    run_dir = Path("runs") / "ppo" / run_name
+    video_dir = Path("videos") / "ppo" / run_name
+    ckpt_dir = Path("checkpoints") / "ppo" / run_name
 
     for d in (run_dir, video_dir, ckpt_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     writer = SummaryWriter(log_dir=str(run_dir))
 
-    train_env = make_train_env(spec=env_spec, seed=seed)
+    n_envs = train_params["n_envs"]
+    train_env = make_train_env(spec=env_spec, seed=seed, n_envs=n_envs)
 
-    ppo_cfg    = cfg.get("ppo", {})
+    ppo_cfg = cfg.get("ppo", {})
     hidden_dim = int(cfg.get("architecture", {}).get("hidden_dim", 256))
 
-    n_steps    = train_params["rollout_size"]
+    n_steps = train_params["rollout_size"]
     batch_size = int(ppo_cfg.get("minibatch_size", 512))
-    # SB3 requires batch_size <= n_steps
-    if batch_size > n_steps:
-        batch_size = n_steps
+    if batch_size > (n_steps * n_envs):
+        batch_size = n_steps * n_envs
 
     model = PPO(
         policy="CnnPolicy",
@@ -308,20 +320,14 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
         device=device,
     )
 
-    obs, _ = train_env.reset()
+    obs = train_env.reset()
     print("Obs shape:", obs.shape)
     print("Obs min:", obs.min(), "Obs max:", obs.max())
     print("Action space:", train_env.action_space)
 
-    # test recompensa con política aleatoria
-    total_r = 0
-    for _ in range(200):
-        action = train_env.action_space.sample()
-        obs, r, term, trunc, info = train_env.step(action)
-        total_r += r
-        if term or trunc:
-            break
-    print("Total reward random policy:", total_r)
+    sample_action = np.array([train_env.action_space.sample() for _ in range(train_env.num_envs)])
+    obs, rewards, dones, infos = train_env.step(sample_action)
+    print("Sample rewards:", rewards)
     train_env.reset()
 
     model.learn(

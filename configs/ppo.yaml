@@ -11,6 +11,7 @@ environment:
   grayscale: false
   action_repeat: 1
   time_limit: 1000
+  n_envs: 4
 
 architecture:
   hidden_dim: 256
@@ -21,14 +22,14 @@ ppo:
   lambd: 0.95
   k_epochs: 10
   eps_clip: 0.2
-  entropy_coef: 0.003
+  entropy_coef: 0.01
   value_coef: 0.5
   max_grad_norm: 0.5
   minibatch_size: 256
 
 train:
   total_steps: 3000000
-  rollout_size: 4096
+  rollout_size: 1024
   checkpoint_freq: 50000
   video_freq: 50000
   num_videos: 4

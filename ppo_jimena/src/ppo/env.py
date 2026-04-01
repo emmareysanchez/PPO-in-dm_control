@@ -8,6 +8,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from gymnasium.wrappers import RecordVideo, TimeLimit
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
 
 from ppo_jimena.src.ppo.reward import walker2d_reward
 
@@ -495,8 +496,21 @@ def _build_env_stack(spec: EnvSpec, seed: int, reward_fn: RewardFn | None) -> gy
     return env
 
 
-def make_train_env(spec: EnvSpec, seed: int) -> gym.Env:
-    return _build_env_stack(spec=spec, seed=seed, reward_fn=walker2d_reward)
+def _make_env_fn(spec: EnvSpec, seed: int):
+    def _thunk():
+        return _build_env_stack(spec=spec, seed=seed, reward_fn=walker2d_reward)
+    return _thunk
+
+
+def make_train_env(spec: EnvSpec, seed: int, n_envs: int = 4):
+    if n_envs <= 1:
+        env = DummyVecEnv([_make_env_fn(spec=spec, seed=seed)])
+    else:
+        env_fns = [_make_env_fn(spec=spec, seed=seed + i) for i in range(n_envs)]
+        env = SubprocVecEnv(env_fns)
+
+    env = VecMonitor(env)
+    return env
 
 
 def make_eval_env(spec: EnvSpec, seed: int, video_dir: str) -> gym.Env:
