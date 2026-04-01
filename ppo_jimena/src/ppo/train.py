@@ -7,6 +7,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 import os
+os.environ["MUJOCO_GL"] = "egl" 
 
 import numpy as np
 import torch
@@ -18,7 +19,6 @@ from tqdm import tqdm
 
 from ppo_jimena.src.ppo.env import EnvSpec, make_eval_env, make_train_env
 
-os.environ["MUJOCO_GL"] = "egl" 
 # ── YAML helpers ──────────────────────────────────────────────────────────────
 
 def load_yaml(path: str) -> dict[str, Any]:
