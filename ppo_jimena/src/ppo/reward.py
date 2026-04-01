@@ -18,11 +18,15 @@ def walker2d_reward(
     reward_ctrl = float(info.get("reward_ctrl", 0.0))
     reward_survive = float(info.get("reward_survive", 0.0))
 
+    # Penalizar caer (terminated sin truncated = caída)
+    fall_penalty = -20.0 if (terminated and not truncated) else 0.0
+
     return (
-    1.5 * reward_forward
-    + 1.0 * reward_survive
-    + 0.1 * reward_ctrl
-)
+        3.0 * reward_forward      # positivo si avanza, negativo si retrocede
+        + 0.5 * reward_survive    # sobrevivir importa menos que avanzar
+        + 0.5 * reward_ctrl       # ya negativo, penaliza torque
+        + fall_penalty            # penalización explícita por caer
+    )
 
 
 walker2d_default_reward = walker2d_reward
