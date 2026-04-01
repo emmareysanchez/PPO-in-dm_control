@@ -6,6 +6,7 @@ import time
 from collections import deque
 from pathlib import Path
 from typing import Any
+import os
 
 import numpy as np
 import torch
@@ -17,7 +18,7 @@ from tqdm import tqdm
 
 from ppo_jimena.src.ppo.env import EnvSpec, make_eval_env, make_train_env
 
-
+os.environ["MUJOCO_GL"] = "egl" 
 # ── YAML helpers ──────────────────────────────────────────────────────────────
 
 def load_yaml(path: str) -> dict[str, Any]:
@@ -306,6 +307,7 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
         total_steps=train_params["total_steps"],
         device=device,
     )
+
     obs, _ = train_env.reset()
     print("Obs shape:", obs.shape)
     print("Obs min:", obs.min(), "Obs max:", obs.max())
@@ -321,7 +323,7 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
             break
     print("Total reward random policy:", total_r)
     train_env.reset()
-    
+
     model.learn(
         total_timesteps=train_params["total_steps"],
         callback=callback,

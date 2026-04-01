@@ -18,9 +18,10 @@ def walker2d_reward(
     reward_ctrl = float(info.get("reward_ctrl", 0.0))
     reward_survive = float(info.get("reward_survive", 0.0))
 
+    forward_bonus = max(0.0, reward_forward)
     return (
-        3.0 * reward_forward
-        + 0.5 * reward_survive
+        3.0 * forward_bonus
+        + 1.0 * reward_survive
         + 0.5 * reward_ctrl
     )
 
