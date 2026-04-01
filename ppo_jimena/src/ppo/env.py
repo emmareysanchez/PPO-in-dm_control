@@ -393,33 +393,39 @@ class PixelObservationWrapper(gym.Wrapper):
         return self._get_obs(), info
 
     def step(self, action) -> tuple[np.ndarray, float, bool, bool, dict]:
+        prev_obs = self._get_obs()
+
         _obs, reward, terminated, truncated, raw_info = self.env.step(action)
         raw_info = dict(raw_info)
         raw_info["terminated"] = bool(terminated)
-        raw_info["truncated"]  = bool(truncated)
+        raw_info["truncated"] = bool(truncated)
 
-        prev_obs = self._get_obs()
         info, self._prev_head_xy, self._prev_body_xy = _build_info(
             raw_info=raw_info,
-            env=self,                        # self.unwrapped used inside
+            env=self,
             action_repeat=self.action_repeat,
             terminated=bool(terminated),
             truncated=bool(truncated),
             prev_head_xy=self._prev_head_xy,
             prev_body_xy=self._prev_body_xy,
         )
+
         next_obs = self._get_obs()
+
         if self._reward_fn is not None:
-            reward = float(self._reward_fn(
-                prev_obs,
-                np.asarray(action, dtype=np.float32),
-                next_obs,
-                bool(terminated),
-                bool(truncated),
-                info,
-                float(reward),
-                self.env,
-            ))
+            reward = float(
+                self._reward_fn(
+                    prev_obs,
+                    np.asarray(action, dtype=np.float32),
+                    next_obs,
+                    bool(terminated),
+                    bool(truncated),
+                    info,
+                    float(reward),
+                    self.env,
+                )
+            )
+
         return next_obs, float(reward), bool(terminated), bool(truncated), info
 
 
