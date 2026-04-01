@@ -21,8 +21,6 @@ from tqdm import tqdm
 from ppo_jimena.src.ppo.env import EnvSpec, make_eval_env, make_train_env
 
 
-# ── YAML helpers ──────────────────────────────────────────────────────────────
-
 def load_yaml(path: str) -> dict[str, Any]:
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -45,7 +43,7 @@ def resolve_env_spec(cfg: dict[str, Any]) -> EnvSpec:
         return EnvSpec(
             env_id=str(e["env_id"]),
             frame_stack=int(e["frame_stack"]),
-            action_repeat=int(e["action_repeat"]),
+            action_repeat=int(e.get("action_repeat", 1)),
             time_limit=int(e["time_limit"]),
             action_prototypes=e.get("action_prototypes"),
             obs_h=int(e.get("obs_h", 84)),
@@ -66,7 +64,7 @@ def resolve_env_spec(cfg: dict[str, Any]) -> EnvSpec:
     return EnvSpec(
         env_id=str(env_id),
         frame_stack=int(e["frame_stack"]),
-        action_repeat=int(e["action_repeat"]),
+        action_repeat=int(e.get("action_repeat", 1)),
         time_limit=int(e.get("time_limit", 500)),
         action_prototypes=e.get("action_prototypes"),
         obs_h=int(e.get("obs_h", e.get("observation_height", 84))),
@@ -87,21 +85,11 @@ def resolve_train_params(cfg: dict[str, Any]) -> dict[str, Any]:
         "num_videos": int(t.get("num_videos", 4)),
         "eval_freq": int(t.get("eval_freq", 10_000)),
         "eval_episodes": int(t.get("eval_episodes", 5)),
-        "n_envs": int(e.get("n_envs", 1)),
+        "n_envs": int(e.get("n_envs", 4)),
     }
 
 
-# ── Callbacks ─────────────────────────────────────────────────────────────────
-
 class MasterCallback(BaseCallback):
-    """
-    Single callback that handles everything:
-      - TensorBoard logging (episode reward, length, losses, entropy, eval)
-      - Checkpoints
-      - Video recording
-      - tqdm progress bar
-    """
-
     def __init__(
         self,
         writer: SummaryWriter,
@@ -115,12 +103,11 @@ class MasterCallback(BaseCallback):
         eval_freq: int,
         eval_episodes: int,
         total_steps: int,
-        device: str,
     ) -> None:
         super().__init__(verbose=0)
         self.writer = writer
         self.env_spec = env_spec
-        self.seed = seed
+        self.seed = int(seed)
         self.video_dir = video_dir
         self.ckpt_dir = ckpt_dir
         self.checkpoint_freq = int(checkpoint_freq)
@@ -128,7 +115,6 @@ class MasterCallback(BaseCallback):
         self.num_videos = int(num_videos)
         self.eval_freq = int(eval_freq)
         self.eval_episodes = int(eval_episodes)
-        self.device = device
 
         self._ep_rewards: list[float] | None = None
         self._ep_lengths: list[int] | None = None
@@ -136,7 +122,7 @@ class MasterCallback(BaseCallback):
         self._recent: deque[float] = deque(maxlen=10)
 
         self._pbar = tqdm(
-            total=total_steps,
+            total=int(total_steps),
             desc="Training",
             unit="step",
             dynamic_ncols=True,
@@ -144,15 +130,17 @@ class MasterCallback(BaseCallback):
         )
 
     def _on_step(self) -> bool:
-        t = self.num_timesteps
-
+        t = int(self.num_timesteps)
         rewards = self.locals["rewards"]
         dones = self.locals["dones"]
+        infos = self.locals.get("infos", [])
         n_envs = len(rewards)
 
         if self._ep_rewards is None:
             self._ep_rewards = [0.0 for _ in range(n_envs)]
             self._ep_lengths = [0 for _ in range(n_envs)]
+
+        assert self._ep_lengths is not None
 
         for i in range(n_envs):
             self._ep_rewards[i] += float(rewards[i])
@@ -163,6 +151,11 @@ class MasterCallback(BaseCallback):
                 ep_reward = self._ep_rewards[i]
                 ep_length = self._ep_lengths[i]
 
+                episode_info = infos[i].get("episode") if i < len(infos) else None
+                if isinstance(episode_info, dict):
+                    ep_reward = float(episode_info.get("r", ep_reward))
+                    ep_length = int(episode_info.get("l", ep_length))
+
                 self._recent.append(ep_reward)
                 self.writer.add_scalar("train/episode_reward", ep_reward, t)
                 self.writer.add_scalar("train/episode_length", ep_length, t)
@@ -172,8 +165,7 @@ class MasterCallback(BaseCallback):
                 self._ep_lengths[i] = 0
 
         if t % self.checkpoint_freq == 0:
-            path = str(self.ckpt_dir / f"step_{t}")
-            self.model.save(path)
+            self.model.save(str(self.ckpt_dir / f"step_{t}"))
 
         if t % self.video_freq == 0:
             step_dir = self.video_dir / f"step_{t}"
@@ -183,8 +175,8 @@ class MasterCallback(BaseCallback):
         if t % self.eval_freq == 0:
             eval_video_dir = str(self.video_dir / "eval" / f"step_{t}")
             returns = self._run_eval(eval_video_dir, seed_offset=t)
-            for i, r in enumerate(returns):
-                self.writer.add_scalar("eval/episode_reward", r, t + i)
+            for i, value in enumerate(returns):
+                self.writer.add_scalar("eval/episode_reward", float(value), t + i)
             self.writer.add_scalar("eval/mean_episode_reward", float(np.mean(returns)), t)
             self.writer.add_scalar("eval/std_episode_reward", float(np.std(returns)), t)
 
@@ -195,9 +187,9 @@ class MasterCallback(BaseCallback):
                 "train/entropy_loss",
                 "train/approx_kl",
             ]:
-                val = self.model.logger.name_to_value.get(key)
-                if val is not None:
-                    self.writer.add_scalar(key, val, t)
+                value = self.model.logger.name_to_value.get(key)
+                if value is not None:
+                    self.writer.add_scalar(key, float(value), t)
 
         self._pbar.n = min(t, self._pbar.total)
         self._pbar.refresh()
@@ -225,9 +217,9 @@ class MasterCallback(BaseCallback):
                 total = 0.0
                 while not done:
                     action, _ = self.model.predict(obs, deterministic=True)
-                    obs, r, terminated, truncated, _ = env.step(action)
+                    obs, reward, terminated, truncated, _ = env.step(action)
                     done = bool(terminated or truncated)
-                    total += float(r)
+                    total += float(reward)
                 returns.append(total)
         env.close()
         return returns
@@ -240,12 +232,10 @@ class MasterCallback(BaseCallback):
                 done = False
                 while not done:
                     action, _ = self.model.predict(obs, deterministic=True)
-                    obs, _r, terminated, truncated, _ = env.step(action)
+                    obs, _reward, terminated, truncated, _ = env.step(action)
                     done = bool(terminated or truncated)
         env.close()
 
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main(config_path: str = "configs/ppo.yaml") -> None:
     cfg = load_yaml(config_path)
@@ -266,33 +256,33 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
     video_dir = Path("videos") / "ppo" / run_name
     ckpt_dir = Path("checkpoints") / "ppo" / run_name
 
-    for d in (run_dir, video_dir, ckpt_dir):
-        d.mkdir(parents=True, exist_ok=True)
+    for directory in (run_dir, video_dir, ckpt_dir):
+        directory.mkdir(parents=True, exist_ok=True)
 
     writer = SummaryWriter(log_dir=str(run_dir))
 
-    n_envs = train_params["n_envs"]
+    n_envs = int(train_params["n_envs"])
     train_env = make_train_env(spec=env_spec, seed=seed, n_envs=n_envs)
 
     ppo_cfg = cfg.get("ppo", {})
     hidden_dim = int(cfg.get("architecture", {}).get("hidden_dim", 256))
 
-    n_steps = train_params["rollout_size"]
+    n_steps = int(train_params["rollout_size"])
     batch_size = int(ppo_cfg.get("minibatch_size", 512))
-    if batch_size > (n_steps * n_envs):
-        batch_size = n_steps * n_envs
+    if batch_size > n_steps:
+        batch_size = n_steps
 
     model = PPO(
         policy="CnnPolicy",
         env=train_env,
-        learning_rate=float(ppo_cfg.get("actor_lr", 3e-5)),
+        learning_rate=float(ppo_cfg.get("actor_lr", 1e-4)),
         n_steps=n_steps,
         batch_size=batch_size,
         n_epochs=int(ppo_cfg.get("k_epochs", 10)),
         gamma=float(ppo_cfg.get("gamma", 0.99)),
         gae_lambda=float(ppo_cfg.get("lambd", 0.95)),
         clip_range=float(ppo_cfg.get("eps_clip", 0.2)),
-        ent_coef=float(ppo_cfg.get("entropy_coef", 0.02)),
+        ent_coef=float(ppo_cfg.get("entropy_coef", 0.01)),
         vf_coef=float(ppo_cfg.get("value_coef", 0.5)),
         max_grad_norm=float(ppo_cfg.get("max_grad_norm", 0.5)),
         policy_kwargs={
@@ -317,7 +307,6 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
         eval_freq=train_params["eval_freq"],
         eval_episodes=train_params["eval_episodes"],
         total_steps=train_params["total_steps"],
-        device=device,
     )
 
     obs = train_env.reset()
@@ -331,7 +320,7 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
     train_env.reset()
 
     model.learn(
-        total_timesteps=train_params["total_steps"],
+        total_timesteps=int(train_params["total_steps"]),
         callback=callback,
         reset_num_timesteps=True,
         tb_log_name=".",
