@@ -306,7 +306,22 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
         total_steps=train_params["total_steps"],
         device=device,
     )
+    obs, _ = train_env.reset()
+    print("Obs shape:", obs.shape)
+    print("Obs min:", obs.min(), "Obs max:", obs.max())
+    print("Action space:", train_env.action_space)
 
+    # test recompensa con política aleatoria
+    total_r = 0
+    for _ in range(200):
+        action = train_env.action_space.sample()
+        obs, r, term, trunc, info = train_env.step(action)
+        total_r += r
+        if term or trunc:
+            break
+    print("Total reward random policy:", total_r)
+    train_env.reset()
+    
     model.learn(
         total_timesteps=train_params["total_steps"],
         callback=callback,
