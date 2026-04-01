@@ -19,16 +19,16 @@ ppo:
   actor_lr: 1e-4
   gamma: 0.99
   lambd: 0.95
-  k_epochs: 5
+  k_epochs: 10
   eps_clip: 0.2
-  entropy_coef: 0.001
+  entropy_coef: 0.003
   value_coef: 0.5
   max_grad_norm: 0.5
   minibatch_size: 256
 
 train:
   total_steps: 3000000
-  rollout_size: 2048
+  rollout_size: 4096
   checkpoint_freq: 50000
   video_freq: 50000
   num_videos: 4
