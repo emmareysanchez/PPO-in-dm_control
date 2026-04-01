@@ -8,7 +8,7 @@ environment:
   obs_h: 84
   obs_w: 84
   frame_stack: 4
-  grayscale: true
+  grayscale: false
   action_repeat: 2
   time_limit: 1000
 
@@ -16,7 +16,7 @@ architecture:
   hidden_dim: 256
 
 ppo:
-  actor_lr: 3e-4
+  actor_lr: 1e-4
   gamma: 0.99
   lambd: 0.95
   k_epochs: 5

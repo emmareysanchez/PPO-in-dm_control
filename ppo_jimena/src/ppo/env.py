@@ -12,7 +12,7 @@ from gymnasium.wrappers import RecordVideo, TimeLimit
 from ppo_jimena.src.ppo.reward import walker2d_reward
 
 
-CROPS: tuple[float, float, float, float] = (0.15, 0.05, 0.05, 0.05)
+CROPS: tuple[float, float, float, float] = (0.02, 0.02, 0.02, 0.02)
 
 
 # ── MuJoCo introspection helpers ─────────────────────────────────────────────
