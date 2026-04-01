@@ -284,7 +284,7 @@ def main(config_path: str = "configs/ppo.yaml") -> None:
         vf_coef=float(ppo_cfg.get("value_coef", 0.5)),
         max_grad_norm=float(ppo_cfg.get("max_grad_norm", 0.5)),
         policy_kwargs={
-            "net_arch": [],
+            "net_arch": [256, 256],
             "features_extractor_kwargs": {"features_dim": hidden_dim},
         },
         tensorboard_log=None,
