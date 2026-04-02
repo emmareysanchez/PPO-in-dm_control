@@ -8,13 +8,13 @@ environment:
   obs_h: 84
   obs_w: 84
   frame_stack: 4
-  grayscale: false
+  grayscale: true
   action_repeat: 1
   time_limit: 1000
-  n_envs: 8
+  n_envs: 4
 
 architecture:
-  hidden_dim: 512
+  hidden_dim: 256
 
 ppo:
   actor_lr: 1e-4
@@ -29,7 +29,7 @@ ppo:
 
 train:
   total_steps: 3000000
-  rollout_size: 2048
+  rollout_size: 1024
   checkpoint_freq: 50000
   video_freq: 50000
   num_videos: 4

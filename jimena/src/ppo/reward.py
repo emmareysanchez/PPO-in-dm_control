@@ -14,25 +14,25 @@ def walker2d_reward(
     env_reward: float,
     env: gym.Env,
 ) -> float:
-    reward_forward = float(info.get("reward_forward", 0.0))
-    reward_survive = float(info.get("reward_survive", 0.0))
-    reward_ctrl = float(info.get("reward_ctrl", 0.0))
-
     data = env.unwrapped.data
-    z = float(data.qpos[1])
-    ang = float(data.qpos[2])
 
-    fall_penalty = -3.0 if (terminated and not truncated) else 0.0
-    posture_penalty = -0.3 * abs(ang)
-    low_height_penalty = -0.5 if z < 0.95 else 0.0
+    z = float(data.qpos[1])      # torso height
+    ang = float(data.qpos[2])    # torso pitch
+    z_vel = float(data.qvel[1])  # vertical velocity
 
+    # Small shaping only
+    posture_penalty = -0.10 * abs(ang)
+    bounce_penalty = -0.05 * abs(z_vel)
+
+    # Very mild penalty only if it is clearly too low
+    low_height_penalty = -0.20 if z < 0.80 else 0.0
+
+    # Do not add a big explicit fall penalty here
     reward = (
-        1.2 * reward_forward
-        + 1.2 * reward_survive
-        + 0.5 * reward_ctrl
+        float(env_reward)
         + posture_penalty
+        + bounce_penalty
         + low_height_penalty
-        + fall_penalty
     )
 
     return float(reward)
