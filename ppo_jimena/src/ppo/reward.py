@@ -35,8 +35,8 @@ def walker2d_reward(
     low_height_penalty = -2.0 if z < 0.95 else 0.0
 
     reward = (
-        2.5 * reward_forward
-        + 0.5 * reward_survive
+        1.5 * reward_forward
+        + 1.0 * reward_survive
         + 0.5 * reward_ctrl
         + vertical_penalty
         + angle_penalty
