@@ -8,7 +8,7 @@ import numpy as np
 from gymnasium import spaces
 from gymnasium.wrappers import RecordVideo, TimeLimit
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
-from sac_jimena.src.sac.reward import walker2d_reward
+from jimena.src.sac.reward import walker2d_reward
 
 
 @dataclass
