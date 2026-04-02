@@ -10,7 +10,7 @@ environment:
   frame_stack: 4
   grayscale: false
   action_repeat: 2         # action repeat ayuda mucho en pixel-SAC
-  time_limit: 1000
+  time_limit: 2000
   n_envs: 1
 
 architecture:

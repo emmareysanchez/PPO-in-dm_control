@@ -8,7 +8,7 @@ import numpy as np
 from gymnasium import spaces
 from gymnasium.wrappers import RecordVideo, TimeLimit
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
-from jimena.src.sac.reward import walker2d_reward
+from sac_jimena.src.sac.reward import walker2d_reward
 
 
 @dataclass
@@ -80,6 +80,23 @@ class PixelObservationWrapper(gym.Wrapper):
         return next_obs, float(reward), bool(terminated), bool(truncated), info
 
 
+class ActionRepeat(gym.Wrapper):
+    """Repeat each action for k environment steps, accumulating reward."""
+
+    def __init__(self, env: gym.Env, k: int) -> None:
+        super().__init__(env=env)
+        self.k = int(k)
+
+    def step(self, action) -> tuple[np.ndarray, float, bool, bool, dict]:
+        total_reward = 0.0
+        for _ in range(self.k):
+            obs, reward, terminated, truncated, info = self.env.step(action)
+            total_reward += float(reward)
+            if terminated or truncated:
+                break
+        return obs, total_reward, bool(terminated), bool(truncated), info
+
+
 class FrameStack(gym.Wrapper):
     """Stack the k most recent frames on the channel axis."""
 
@@ -118,6 +135,10 @@ def _build_env_stack(spec: EnvSpec, seed: int) -> gym.Env:
     env.action_space.seed(int(seed))
 
     env = gym.wrappers.RecordEpisodeStatistics(env)
+
+    if int(spec.action_repeat) > 1:
+        env = ActionRepeat(env=env, k=int(spec.action_repeat))
+
     env = PixelObservationWrapper(
         env=env,
         height=int(spec.obs_h),
