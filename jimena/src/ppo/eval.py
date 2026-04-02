@@ -8,7 +8,7 @@ import numpy as np
 import yaml
 from stable_baselines3 import PPO
 
-from ppo_jimena.src.ppo.env import EnvSpec, make_eval_env
+from jimena.src.ppo.env import EnvSpec, make_eval_env
 
 
 def load_yaml(path: str) -> dict[str, Any]:

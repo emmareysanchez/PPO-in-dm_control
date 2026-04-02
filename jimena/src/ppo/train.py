@@ -18,7 +18,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from ppo_jimena.src.ppo.env import EnvSpec, make_eval_env, make_train_env
+from jimena.src.ppo.env import EnvSpec, make_eval_env, make_train_env
 
 
 def load_yaml(path: str) -> dict[str, Any]:
