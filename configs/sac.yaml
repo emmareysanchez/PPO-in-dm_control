@@ -9,10 +9,8 @@ environment:
   obs_w: 84
   frame_stack: 4
   grayscale: false
-  action_repeat: 1
+  action_repeat: 2         # action repeat ayuda mucho en pixel-SAC
   time_limit: 1000
-  # SAC is off-policy: typically n_envs=1. Increase only if you want
-  # parallel data collection (less common with SAC).
   n_envs: 1
 
 architecture:
@@ -21,23 +19,23 @@ architecture:
 sac:
   lr: 3e-4
   gamma: 0.99
-  tau: 0.005                   # Polyak averaging coefficient for target networks
+  tau: 0.005
   batch_size: 256
-  buffer_size: 300000          # Replay buffer (reduce if GPU VRAM is limited)
-  train_freq: 1                # Collect 1 env step before each gradient update
-  target_update_interval: 1   # Update target networks every N gradient steps
-  ent_coef: "auto"             # "auto" = learned temperature; or set a float e.g. 0.1
+  buffer_size: 100000      # ~8GB RAM con float32; vigila el uso
+  train_freq: 1
+  target_update_interval: 1
+  ent_coef: "auto"
 
 train:
-  total_steps: 1000000
-  gradient_steps: 1            # Gradient updates per env step (increase for more sample efficiency)
-  learning_starts: 10000       # Fill replay buffer before training begins
-  checkpoint_freq: 50000
-  video_freq: 50000
+  total_steps: 10000000     # mínimo realista para pixel-based
+  gradient_steps: 2        # más eficiencia muestral
+  learning_starts: 20000
+  checkpoint_freq: 100000
+  video_freq: 100000
   num_videos: 4
-  eval_freq: 10000
+  eval_freq: 25000
   eval_episodes: 5
 
 logging:
-  save_freq: 50000
+  save_freq: 100000
   log_dir: runs/sac
