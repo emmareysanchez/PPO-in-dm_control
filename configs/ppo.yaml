@@ -9,7 +9,7 @@ environment:
   obs_w: 84
   frame_stack: 4
   grayscale: true
-  action_repeat: 1
+  action_repeat: 2
   time_limit: 1000
   n_envs: 4
 
