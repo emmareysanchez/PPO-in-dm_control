@@ -8,6 +8,7 @@ import numpy as np
 from gymnasium import spaces
 from gymnasium.wrappers import RecordVideo, TimeLimit
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
+from ppo_jimena.src.ppo.reward import walker2d_reward
 
 
 @dataclass
@@ -63,7 +64,20 @@ class PixelObservationWrapper(gym.Wrapper):
 
     def step(self, action) -> tuple[np.ndarray, float, bool, bool, dict]:
         _, reward, terminated, truncated, info = self.env.step(action)
-        return self._get_obs(), float(reward), bool(terminated), bool(truncated), info
+        next_obs = self._get_obs()
+        
+        reward = walker2d_reward(
+            obs=None,
+            action=action,
+            next_obs=next_obs,
+            terminated=terminated,
+            truncated=truncated,
+            info=info,
+            env_reward=float(reward),
+            env=self.env,
+        )
+        
+        return next_obs, float(reward), bool(terminated), bool(truncated), info
 
 
 class FrameStack(gym.Wrapper):
