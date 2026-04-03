@@ -298,7 +298,7 @@ def main(config_path: str = "configs/sac.yaml") -> None:
         tensorboard_log=None,
         device=device,
         seed=seed,
-        verbose=1,
+        verbose=0,
     )
 
     callback = MasterCallback(
@@ -314,16 +314,6 @@ def main(config_path: str = "configs/sac.yaml") -> None:
         eval_episodes=train_params["eval_episodes"],
         total_steps=train_params["total_steps"],
     )
-
-    obs = train_env.reset()
-    print("Obs shape:", obs.shape)
-    print("Obs min:", obs.min(), "Obs max:", obs.max())
-    print("Action space:", train_env.action_space)
-
-    sample_action = np.array([train_env.action_space.sample() for _ in range(train_env.num_envs)])
-    obs, rewards, dones, infos = train_env.step(sample_action)
-    print("Sample rewards:", rewards)
-    train_env.reset()
 
     model.learn(
         total_timesteps=int(train_params["total_steps"]),

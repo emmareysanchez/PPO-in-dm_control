@@ -5,12 +5,12 @@ experiment:
 
 environment:
   env_id: Walker2d-v5
-  obs_h: 84
-  obs_w: 84
-  frame_stack: 4
-  grayscale: false
-  action_repeat: 2         # action repeat ayuda mucho en pixel-SAC
-  time_limit: 2000
+  obs_h: 64
+  obs_w: 64
+  frame_stack: 3
+  grayscale: true
+  action_repeat: 2
+  time_limit: 1000
   n_envs: 1
 
 architecture:
@@ -20,21 +20,21 @@ sac:
   lr: 3e-4
   gamma: 0.99
   tau: 0.005
-  batch_size: 256
-  buffer_size: 100000      # ~8GB RAM con float32; vigila el uso
+  batch_size: 128
+  buffer_size: 100000
   train_freq: 1
   target_update_interval: 1
   ent_coef: "auto"
 
 train:
-  total_steps: 10000000     # mínimo realista para pixel-based
-  gradient_steps: 2        # más eficiencia muestral
-  learning_starts: 20000
-  checkpoint_freq: 100000
+  total_steps: 3000000
+  gradient_steps: 1
+  learning_starts: 10000
+  checkpoint_freq: 200000
   video_freq: 100000
   num_videos: 4
-  eval_freq: 25000
-  eval_episodes: 5
+  eval_freq: 50000
+  eval_episodes: 3
 
 logging:
   save_freq: 100000
