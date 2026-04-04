@@ -9,7 +9,7 @@ environment:
   obs_w: 64
   frame_stack: 3
   grayscale: true
-  action_repeat: 2
+  action_repeat: 1
   time_limit: 1000
   n_envs: 1
 
@@ -22,13 +22,13 @@ sac:
   tau: 0.005
   batch_size: 128
   buffer_size: 200000
-  train_freq: 4
+  train_freq: 1
   target_update_interval: 1
   ent_coef: 0.2
 
 train:
   total_steps: 3000000
-  gradient_steps: 4
+  gradient_steps: 1
   learning_starts: 10000
   checkpoint_freq: 200000
   video_freq: 100000

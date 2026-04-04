@@ -21,8 +21,8 @@ def walker2d_reward(
     fall_penalty = -3.0 if (terminated and not truncated) else 0.0
 
     reward = (
-        2.3 * reward_forward
-        + 0.8 * reward_survive
+        3.0 * reward_forward
+        + 0.5 * reward_survive
         + 0.05 * reward_ctrl
         + fall_penalty
     )
