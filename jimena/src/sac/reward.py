@@ -15,15 +15,24 @@ def walker2d_reward(
     env,
 ) -> float:
     reward_forward = float(info.get("reward_forward", 0.0))
-    reward_survive = float(info.get("reward_survive", 0.0))
     reward_ctrl = float(info.get("reward_ctrl", 0.0))
 
-    fall_penalty = -3.0 if (terminated and not truncated) else 0.0
+    data = env.unwrapped.data
+    ang = float(data.qpos[2])   # torso angle
+    z = float(data.qpos[1])     # height
+
+    fall_penalty = -5.0 if (terminated and not truncated) else 0.0
+    posture_penalty = -1.0 * abs(ang)
+    low_height_penalty = -1.0 if z < 1.0 else 0.0
+
+    print(f"[DEBUG info keys] {list(info.keys())}")
+    print(f"[DEBUG] forward={reward_forward:.3f}, ctrl={reward_ctrl:.3f}")
 
     reward = (
-        3.0 * reward_forward
-        + 0.5 * reward_survive
-        + 0.05 * reward_ctrl
+        2.0 * reward_forward
+        + 0.02 * reward_ctrl
+        + posture_penalty
+        + low_height_penalty
         + fall_penalty
     )
     return float(reward)
