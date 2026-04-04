@@ -14,7 +14,7 @@ environment:
   n_envs: 1
 
 architecture:
-  hidden_dim: 128
+  hidden_dim: 256        # antes 128, muy pequeño para CNN visual
 
 sac:
   lr: 1e-4
@@ -24,7 +24,7 @@ sac:
   buffer_size: 200000
   train_freq: 1
   target_update_interval: 1
-  ent_coef: 0.2
+  ent_coef: auto         # antes 0.2 fijo, peligroso con obs visuales
 
 train:
   total_steps: 3000000

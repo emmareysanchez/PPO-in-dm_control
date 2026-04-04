@@ -136,15 +136,15 @@ def _build_env_stack(spec: EnvSpec, seed: int) -> gym.Env:
 
     env = gym.wrappers.RecordEpisodeStatistics(env)
 
-    if int(spec.action_repeat) > 1:
-        env = ActionRepeat(env=env, k=int(spec.action_repeat))
-
     env = PixelObservationWrapper(
         env=env,
         height=int(spec.obs_h),
         width=int(spec.obs_w),
         grayscale=bool(spec.grayscale),
     )
+
+    if int(spec.action_repeat) > 1:
+        env = ActionRepeat(env=env, k=int(spec.action_repeat))
 
     if int(spec.frame_stack) > 1:
         env = FrameStack(env=env, k=int(spec.frame_stack))

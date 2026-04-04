@@ -268,6 +268,11 @@ def main(config_path: str = "configs/sac.yaml") -> None:
     n_envs = int(train_params["n_envs"])
     train_env = make_train_env(spec=env_spec, seed=seed, n_envs=n_envs)
 
+    # VERIFICACIÓN TEMPORAL
+    obs = train_env.reset()
+    print("Obs space :", train_env.observation_space)
+    print("Obs shape :", obs[0].shape if isinstance(obs, tuple) else obs.shape)
+
     sac_cfg = cfg.get("sac", {})
     hidden_dim = int(cfg.get("architecture", {}).get("hidden_dim", 256))
 
@@ -293,7 +298,7 @@ def main(config_path: str = "configs/sac.yaml") -> None:
         target_update_interval=int(sac_cfg.get("target_update_interval", 1)),
         policy_kwargs={
             "net_arch": [hidden_dim, hidden_dim],
-            "features_extractor_kwargs": {"features_dim": hidden_dim},
+            "features_extractor_kwargs": {"features_dim": 256},
         },
         tensorboard_log=None,
         device=device,
