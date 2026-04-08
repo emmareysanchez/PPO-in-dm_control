@@ -5,31 +5,31 @@ experiment:
 
 environment:
   env_id: Walker2d-v5
-  obs_h: 64
-  obs_w: 64
+  obs_h: 84
+  obs_w: 84
   frame_stack: 3
-  grayscale: true
-  action_repeat: 1
+  grayscale: false
+  action_repeat: 2
   time_limit: 1000
   n_envs: 1
 
 architecture:
-  hidden_dim: 256        # antes 128, muy pequeño para CNN visual
+  hidden_dim: 256
 
 sac:
   lr: 1e-4
   gamma: 0.99
   tau: 0.005
-  batch_size: 128
-  buffer_size: 200000
+  batch_size: 256
+  buffer_size: 1000000
   train_freq: 1
   target_update_interval: 1
-  ent_coef: auto         # antes 0.2 fijo, peligroso con obs visuales
+  ent_coef: auto
 
 train:
   total_steps: 3000000
   gradient_steps: 1
-  learning_starts: 20000
+  learning_starts: 50000
   checkpoint_freq: 200000
   video_freq: 100000
   num_videos: 4

@@ -18,7 +18,8 @@ from stable_baselines3.common.callbacks import BaseCallback
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from jimena.src.sac.env import EnvSpec, make_eval_env, make_train_env
+from jimena.src.sac.env import make_eval_env, make_train_env
+from jimena.src.sac.utils import resolve_env_spec, resolve_seed
 
 
 def load_yaml(path: str) -> dict[str, Any]:
@@ -33,61 +34,19 @@ def resolve_device(cfg: dict[str, Any]) -> str:
     return name
 
 
-def resolve_seed(cfg: dict[str, Any]) -> int:
-    return int(cfg.get("seed") or cfg.get("experiment", {}).get("seed", 0))
-
-
-def resolve_env_spec(cfg: dict[str, Any]) -> EnvSpec:
-    if "env" in cfg:
-        e = cfg["env"]
-        return EnvSpec(
-            env_id=str(e["env_id"]),
-            frame_stack=int(e["frame_stack"]),
-            action_repeat=int(e.get("action_repeat", 1)),
-            time_limit=int(e["time_limit"]),
-            action_prototypes=e.get("action_prototypes"),
-            obs_h=int(e.get("obs_h", 84)),
-            obs_w=int(e.get("obs_w", 84)),
-            grayscale=bool(e.get("grayscale", False)),
-        )
-
-    e = cfg["environment"]
-    env_id = e.get("env_id")
-    if env_id is None:
-        domain = str(e.get("domain", "")).lower()
-        task = str(e.get("task", "")).lower()
-        if domain == "walker" and task == "walk":
-            env_id = "Walker2d-v5"
-        else:
-            raise ValueError("YAML must define environment.env_id or a supported domain/task pair.")
-
-    return EnvSpec(
-        env_id=str(env_id),
-        frame_stack=int(e["frame_stack"]),
-        action_repeat=int(e.get("action_repeat", 1)),
-        time_limit=int(e.get("time_limit", 500)),
-        action_prototypes=e.get("action_prototypes"),
-        obs_h=int(e.get("obs_h", e.get("observation_height", 84))),
-        obs_w=int(e.get("obs_w", e.get("observation_width", 84))),
-        grayscale=bool(e.get("grayscale", False)),
-    )
-
-
 def resolve_train_params(cfg: dict[str, Any]) -> dict[str, Any]:
     t = cfg.get("train", {})
     l = cfg.get("logging", {})
     e = cfg.get("environment", cfg.get("env", {}))
     return {
         "total_steps": int(t.get("total_steps", 1_000_000)),
-        # SAC uses gradient_steps per env step instead of a rollout buffer
         "gradient_steps": int(t.get("gradient_steps", 1)),
-        "learning_starts": int(t.get("learning_starts", 10_000)),
+        "learning_starts": int(t.get("learning_starts", 50_000)),
         "checkpoint_freq": int(t.get("checkpoint_freq", l.get("save_freq", 50_000))),
         "video_freq": int(t.get("video_freq", l.get("save_freq", 50_000))),
         "num_videos": int(t.get("num_videos", 4)),
         "eval_freq": int(t.get("eval_freq", 10_000)),
         "eval_episodes": int(t.get("eval_episodes", 5)),
-        # SAC is typically single-env; n_envs > 1 is allowed but unusual
         "n_envs": int(e.get("n_envs", 1)),
     }
 
@@ -96,7 +55,7 @@ class MasterCallback(BaseCallback):
     def __init__(
         self,
         writer: SummaryWriter,
-        env_spec: EnvSpec,
+        env_spec,
         seed: int,
         video_dir: Path,
         ckpt_dir: Path,
@@ -123,6 +82,9 @@ class MasterCallback(BaseCallback):
         self._ep_lengths: list[int] | None = None
         self._ep_idx = 0
         self._recent: deque[float] = deque(maxlen=10)
+
+        # Cache last known loss values to avoid logging stale/empty entries
+        self._last_losses: dict[str, float] = {}
 
         self._pbar = tqdm(
             total=int(total_steps),
@@ -183,17 +145,20 @@ class MasterCallback(BaseCallback):
             self.writer.add_scalar("eval/mean_episode_reward", float(np.mean(returns)), t)
             self.writer.add_scalar("eval/std_episode_reward", float(np.std(returns)), t)
 
-        # SAC-specific losses logged by SB3
+        # SAC-specific losses: only log when the logger has fresh values
         if hasattr(self.model, "logger") and self.model.logger is not None:
-            for key in [
+            for key in (
                 "train/actor_loss",
                 "train/critic_loss",
                 "train/ent_coef_loss",
                 "train/ent_coef",
-            ]:
+            ):
                 value = self.model.logger.name_to_value.get(key)
                 if value is not None:
-                    self.writer.add_scalar(key, float(value), t)
+                    new_val = float(value)
+                    if self._last_losses.get(key) != new_val:
+                        self.writer.add_scalar(key, new_val, t)
+                        self._last_losses[key] = new_val
 
         self._pbar.n = min(t, self._pbar.total)
         self._pbar.refresh()
@@ -271,11 +236,8 @@ def main(config_path: str = "configs/sac.yaml") -> None:
     sac_cfg = cfg.get("sac", {})
     hidden_dim = int(cfg.get("architecture", {}).get("hidden_dim", 256))
 
-    # SAC replay buffer size
     buffer_size = int(sac_cfg.get("buffer_size", 1_000_000))
     batch_size = int(sac_cfg.get("batch_size", 256))
-
-    # Entropy temperature: "auto" lets SB3 learn it automatically
     ent_coef = sac_cfg.get("ent_coef", "auto")
 
     model = SAC(
@@ -293,7 +255,7 @@ def main(config_path: str = "configs/sac.yaml") -> None:
         target_update_interval=int(sac_cfg.get("target_update_interval", 1)),
         policy_kwargs={
             "net_arch": [hidden_dim, hidden_dim],
-            "features_extractor_kwargs": {"features_dim": 256},
+            "features_extractor_kwargs": {"features_dim": 512},  # subido de 256
         },
         tensorboard_log=None,
         device=device,

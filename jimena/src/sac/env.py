@@ -32,11 +32,13 @@ class PixelObservationWrapper(gym.Wrapper):
         height: int = 84,
         width: int = 84,
         grayscale: bool = False,
+        action_repeat: int = 1,
     ) -> None:
         super().__init__(env=env)
         self.height = int(height)
         self.width = int(width)
         self.grayscale = bool(grayscale)
+        self.action_repeat = int(action_repeat)
 
         channels = 1 if self.grayscale else 3
         self.observation_space = spaces.Box(
@@ -63,7 +65,18 @@ class PixelObservationWrapper(gym.Wrapper):
         return self._get_obs(), info
 
     def step(self, action) -> tuple[np.ndarray, float, bool, bool, dict]:
-        _, reward, terminated, truncated, info = self.env.step(action)
+        total_reward = 0.0
+        terminated = False
+        truncated = False
+        info = {}
+
+        for _ in range(self.action_repeat):
+            _, reward, terminated, truncated, info = self.env.step(action)
+            total_reward += float(reward)
+
+            if terminated or truncated:
+                break
+
         next_obs = self._get_obs()
 
         reward = walker2d_reward(
@@ -73,28 +86,11 @@ class PixelObservationWrapper(gym.Wrapper):
             terminated=terminated,
             truncated=truncated,
             info=info,
-            env_reward=float(reward),
+            env_reward=float(total_reward),
             env=self.env,
         )
 
         return next_obs, float(reward), bool(terminated), bool(truncated), info
-
-
-class ActionRepeat(gym.Wrapper):
-    """Repeat each action for k environment steps, accumulating reward."""
-
-    def __init__(self, env: gym.Env, k: int) -> None:
-        super().__init__(env=env)
-        self.k = int(k)
-
-    def step(self, action) -> tuple[np.ndarray, float, bool, bool, dict]:
-        total_reward = 0.0
-        for _ in range(self.k):
-            obs, reward, terminated, truncated, info = self.env.step(action)
-            total_reward += float(reward)
-            if terminated or truncated:
-                break
-        return obs, total_reward, bool(terminated), bool(truncated), info
 
 
 class FrameStack(gym.Wrapper):
@@ -135,16 +131,13 @@ def _build_env_stack(spec: EnvSpec, seed: int) -> gym.Env:
     env.action_space.seed(int(seed))
 
     env = gym.wrappers.RecordEpisodeStatistics(env)
-
     env = PixelObservationWrapper(
         env=env,
         height=int(spec.obs_h),
         width=int(spec.obs_w),
         grayscale=bool(spec.grayscale),
+        action_repeat=int(spec.action_repeat),
     )
-
-    if int(spec.action_repeat) > 1:
-        env = ActionRepeat(env=env, k=int(spec.action_repeat))
 
     if int(spec.frame_stack) > 1:
         env = FrameStack(env=env, k=int(spec.frame_stack))

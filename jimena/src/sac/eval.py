@@ -2,56 +2,18 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import yaml
 from stable_baselines3 import SAC
 
-from jimena.src.sac.env import EnvSpec, make_eval_env
+from jimena.src.sac.env import make_eval_env
+from jimena.src.sac.utils import resolve_env_spec, resolve_seed
 
 
-def load_yaml(path: str) -> dict[str, Any]:
+def load_yaml(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
-
-
-def resolve_seed(cfg: dict[str, Any]) -> int:
-    return int(cfg.get("seed") or cfg.get("experiment", {}).get("seed", 0))
-
-
-def resolve_env_spec(cfg: dict[str, Any]) -> EnvSpec:
-    if "env" in cfg:
-        e = cfg["env"]
-        return EnvSpec(
-            env_id=str(e["env_id"]),
-            frame_stack=int(e["frame_stack"]),
-            action_repeat=int(e["action_repeat"]),
-            time_limit=int(e["time_limit"]),
-            action_prototypes=e.get("action_prototypes"),
-            obs_h=int(e.get("obs_h", 84)),
-            obs_w=int(e.get("obs_w", 84)),
-            grayscale=bool(e.get("grayscale", False)),
-        )
-    e = cfg["environment"]
-    env_id = e.get("env_id")
-    if env_id is None:
-        domain = str(e.get("domain", "")).lower()
-        task   = str(e.get("task",   "")).lower()
-        if domain == "walker" and task == "walk":
-            env_id = "Walker2d-v5"
-        else:
-            raise ValueError("YAML must define environment.env_id or a supported domain/task pair.")
-    return EnvSpec(
-        env_id=str(env_id),
-        frame_stack=int(e["frame_stack"]),
-        action_repeat=int(e["action_repeat"]),
-        time_limit=int(e.get("time_limit", 500)),
-        action_prototypes=e.get("action_prototypes"),
-        obs_h=int(e.get("obs_h", e.get("observation_height", 84))),
-        obs_w=int(e.get("obs_w", e.get("observation_width",  84))),
-        grayscale=bool(e.get("grayscale", False)),
-    )
 
 
 def main(config_path: str, ckpt_path: str, episodes: int = 5) -> None:
