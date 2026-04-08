@@ -17,18 +17,18 @@ architecture:
   hidden_dim: 256
 
 sac:
-  lr: 1e-4
+  lr: 2e-5
   gamma: 0.99
-  tau: 0.005
+  tau: 0.002
   batch_size: 256
-  buffer_size: 1000000
+  buffer_size: 300000
   train_freq: 1
   target_update_interval: 1
   ent_coef: auto
 
 train:
   total_steps: 3000000
-  gradient_steps: 1
+  gradient_steps: 2
   learning_starts: 50000
   checkpoint_freq: 200000
   video_freq: 100000
