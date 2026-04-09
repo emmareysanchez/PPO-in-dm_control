@@ -19,6 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from jimena.src.sac.env import make_eval_env, make_train_env
+from jimena.src.sac.replay_buffer import StackedReplayBuffer
 from jimena.src.sac.utils import resolve_env_spec, resolve_seed
 
 
@@ -39,15 +40,15 @@ def resolve_train_params(cfg: dict[str, Any]) -> dict[str, Any]:
     l = cfg.get("logging", {})
     e = cfg.get("environment", cfg.get("env", {}))
     return {
-        "total_steps": int(t.get("total_steps", 1_000_000)),
-        "gradient_steps": int(t.get("gradient_steps", 1)),
+        "total_steps":     int(t.get("total_steps",     1_000_000)),
+        "gradient_steps":  int(t.get("gradient_steps",  1)),
         "learning_starts": int(t.get("learning_starts", 50_000)),
         "checkpoint_freq": int(t.get("checkpoint_freq", l.get("save_freq", 50_000))),
-        "video_freq": int(t.get("video_freq", l.get("save_freq", 50_000))),
-        "num_videos": int(t.get("num_videos", 4)),
-        "eval_freq": int(t.get("eval_freq", 10_000)),
-        "eval_episodes": int(t.get("eval_episodes", 5)),
-        "n_envs": int(e.get("n_envs", 1)),
+        "video_freq":      int(t.get("video_freq",      l.get("save_freq", 50_000))),
+        "num_videos":      int(t.get("num_videos",      4)),
+        "eval_freq":       int(t.get("eval_freq",       10_000)),
+        "eval_episodes":   int(t.get("eval_episodes",   5)),
+        "n_envs":          int(e.get("n_envs",          1)),
     }
 
 
@@ -67,23 +68,21 @@ class MasterCallback(BaseCallback):
         total_steps: int,
     ) -> None:
         super().__init__(verbose=0)
-        self.writer = writer
-        self.env_spec = env_spec
-        self.seed = int(seed)
-        self.video_dir = video_dir
-        self.ckpt_dir = ckpt_dir
+        self.writer        = writer
+        self.env_spec      = env_spec
+        self.seed          = int(seed)
+        self.video_dir     = video_dir
+        self.ckpt_dir      = ckpt_dir
         self.checkpoint_freq = int(checkpoint_freq)
-        self.video_freq = int(video_freq)
-        self.num_videos = int(num_videos)
-        self.eval_freq = int(eval_freq)
+        self.video_freq    = int(video_freq)
+        self.num_videos    = int(num_videos)
+        self.eval_freq     = int(eval_freq)
         self.eval_episodes = int(eval_episodes)
 
         self._ep_rewards: list[float] | None = None
-        self._ep_lengths: list[int] | None = None
-        self._ep_idx = 0
+        self._ep_lengths: list[int]   | None = None
+        self._ep_idx  = 0
         self._recent: deque[float] = deque(maxlen=10)
-
-        # Cache last known loss values to avoid logging stale/empty entries
         self._last_losses: dict[str, float] = {}
 
         self._pbar = tqdm(
@@ -95,15 +94,15 @@ class MasterCallback(BaseCallback):
         )
 
     def _on_step(self) -> bool:
-        t = int(self.num_timesteps)
+        t      = int(self.num_timesteps)
         rewards = self.locals["rewards"]
-        dones = self.locals["dones"]
-        infos = self.locals.get("infos", [])
-        n_envs = len(rewards)
+        dones   = self.locals["dones"]
+        infos   = self.locals.get("infos", [])
+        n_envs  = len(rewards)
 
         if self._ep_rewards is None:
-            self._ep_rewards = [0.0 for _ in range(n_envs)]
-            self._ep_lengths = [0 for _ in range(n_envs)]
+            self._ep_rewards = [0.0] * n_envs
+            self._ep_lengths = [0]   * n_envs
 
         assert self._ep_lengths is not None
 
@@ -113,18 +112,18 @@ class MasterCallback(BaseCallback):
 
             if bool(dones[i]):
                 self._ep_idx += 1
-                ep_reward = self._ep_rewards[i]
-                ep_length = self._ep_lengths[i]
+                ep_r = self._ep_rewards[i]
+                ep_l = self._ep_lengths[i]
 
-                episode_info = infos[i].get("episode") if i < len(infos) else None
-                if isinstance(episode_info, dict):
-                    ep_reward = float(episode_info.get("r", ep_reward))
-                    ep_length = int(episode_info.get("l", ep_length))
+                ep_info = infos[i].get("episode") if i < len(infos) else None
+                if isinstance(ep_info, dict):
+                    ep_r = float(ep_info.get("r", ep_r))
+                    ep_l = int(ep_info.get("l", ep_l))
 
-                self._recent.append(ep_reward)
-                self.writer.add_scalar("train/episode_reward", ep_reward, t)
-                self.writer.add_scalar("train/episode_length", ep_length, t)
-                self.writer.add_scalar("train/episode_index", self._ep_idx, t)
+                self._recent.append(ep_r)
+                self.writer.add_scalar("train/episode_reward", ep_r, t)
+                self.writer.add_scalar("train/episode_length", ep_l, t)
+                self.writer.add_scalar("train/episode_index",  self._ep_idx, t)
 
                 self._ep_rewards[i] = 0.0
                 self._ep_lengths[i] = 0
@@ -140,19 +139,14 @@ class MasterCallback(BaseCallback):
         if t % self.eval_freq == 0:
             eval_video_dir = str(self.video_dir / "eval" / f"step_{t}")
             returns = self._run_eval(eval_video_dir, seed_offset=t)
-            for i, value in enumerate(returns):
-                self.writer.add_scalar("eval/episode_reward", float(value), t + i)
+            for i, v in enumerate(returns):
+                self.writer.add_scalar("eval/episode_reward", float(v), t + i)
             self.writer.add_scalar("eval/mean_episode_reward", float(np.mean(returns)), t)
-            self.writer.add_scalar("eval/std_episode_reward", float(np.std(returns)), t)
+            self.writer.add_scalar("eval/std_episode_reward",  float(np.std(returns)),  t)
 
-        # SAC-specific losses: only log when the logger has fresh values
         if hasattr(self.model, "logger") and self.model.logger is not None:
-            for key in (
-                "train/actor_loss",
-                "train/critic_loss",
-                "train/ent_coef_loss",
-                "train/ent_coef",
-            ):
+            for key in ("train/actor_loss", "train/critic_loss",
+                        "train/ent_coef_loss", "train/ent_coef"):
                 value = self.model.logger.name_to_value.get(key)
                 if value is not None:
                     new_val = float(value)
@@ -162,14 +156,12 @@ class MasterCallback(BaseCallback):
 
         self._pbar.n = min(t, self._pbar.total)
         self._pbar.refresh()
-
         if self._recent:
             self._pbar.set_postfix(
                 ep=self._ep_idx,
                 ret=f"{float(np.mean(self._recent)):.1f}",
                 best=f"{max(self._recent):.1f}",
             )
-
         return True
 
     def _on_training_end(self) -> None:
@@ -182,8 +174,7 @@ class MasterCallback(BaseCallback):
         with torch.no_grad():
             for _ in range(self.eval_episodes):
                 obs, _ = env.reset()
-                done = False
-                total = 0.0
+                done, total = False, 0.0
                 while not done:
                     action, _ = self.model.predict(obs, deterministic=True)
                     obs, reward, terminated, truncated, _ = env.step(action)
@@ -201,17 +192,16 @@ class MasterCallback(BaseCallback):
                 done = False
                 while not done:
                     action, _ = self.model.predict(obs, deterministic=True)
-                    obs, _reward, terminated, truncated, _ = env.step(action)
+                    obs, _r, terminated, truncated, _ = env.step(action)
                     done = bool(terminated or truncated)
         env.close()
 
 
 def main(config_path: str = "configs/sac.yaml") -> None:
-    cfg = load_yaml(config_path)
-
-    device = resolve_device(cfg)
-    seed = resolve_seed(cfg)
-    env_spec = resolve_env_spec(cfg)
+    cfg          = load_yaml(config_path)
+    device       = resolve_device(cfg)
+    seed         = resolve_seed(cfg)
+    env_spec     = resolve_env_spec(cfg)
     train_params = resolve_train_params(cfg)
 
     random.seed(seed)
@@ -221,29 +211,26 @@ def main(config_path: str = "configs/sac.yaml") -> None:
         torch.cuda.manual_seed_all(seed)
 
     run_name = time.strftime("%Y-%m-%d_%H-%M-%S")
-    run_dir = Path("runs") / "sac" / run_name
-    video_dir = Path("videos") / "sac" / run_name
-    ckpt_dir = Path("checkpoints") / "sac" / run_name
+    run_dir  = Path("runs")        / "sac" / run_name
+    video_dir = Path("videos")     / "sac" / run_name
+    ckpt_dir  = Path("checkpoints") / "sac" / run_name
+    for d in (run_dir, video_dir, ckpt_dir):
+        d.mkdir(parents=True, exist_ok=True)
 
-    for directory in (run_dir, video_dir, ckpt_dir):
-        directory.mkdir(parents=True, exist_ok=True)
-
-    writer = SummaryWriter(log_dir=str(run_dir))
-
-    n_envs = int(train_params["n_envs"])
+    writer    = SummaryWriter(log_dir=str(run_dir))
+    n_envs    = int(train_params["n_envs"])
     train_env = make_train_env(spec=env_spec, seed=seed, n_envs=n_envs)
 
-    sac_cfg = cfg.get("sac", {})
+    sac_cfg    = cfg.get("sac", {})
     hidden_dim = int(cfg.get("architecture", {}).get("hidden_dim", 256))
-
-    buffer_size = int(sac_cfg.get("buffer_size", 1_000_000))
-    batch_size = int(sac_cfg.get("batch_size", 256))
-    ent_coef = sac_cfg.get("ent_coef", "auto")
+    buffer_size = int(sac_cfg.get("buffer_size", 300_000))
+    batch_size  = int(sac_cfg.get("batch_size",  256))
+    ent_coef    = sac_cfg.get("ent_coef", "auto")
 
     model = SAC(
         policy="CnnPolicy",
         env=train_env,
-        learning_rate=float(sac_cfg.get("lr", 3e-4)),
+        learning_rate=float(sac_cfg.get("lr", 1e-4)),
         buffer_size=buffer_size,
         batch_size=batch_size,
         tau=float(sac_cfg.get("tau", 0.005)),
@@ -255,8 +242,10 @@ def main(config_path: str = "configs/sac.yaml") -> None:
         target_update_interval=int(sac_cfg.get("target_update_interval", 1)),
         policy_kwargs={
             "net_arch": [hidden_dim, hidden_dim],
-            "features_extractor_kwargs": {"features_dim": 512},  # subido de 256
+            "features_extractor_kwargs": {"features_dim": 512},
         },
+        replay_buffer_class=StackedReplayBuffer,
+        replay_buffer_kwargs={"frame_stack": int(env_spec.frame_stack)},
         tensorboard_log=None,
         device=device,
         seed=seed,
