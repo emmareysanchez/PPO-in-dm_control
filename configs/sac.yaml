@@ -1,15 +1,15 @@
 experiment:
-  name: walker_sac_visual_continuous
+  name: walker_sac_simple
   device: cuda
   seed: 0
 
 environment:
   env_id: Walker2d-v5
-  obs_h: 84
-  obs_w: 84
-  frame_stack: 4
-  grayscale: false
-  action_repeat: 2
+  obs_h: 64
+  obs_w: 64
+  frame_stack: 3
+  grayscale: true
+  action_repeat: 1
   time_limit: 1000
   n_envs: 1
   reward_shaping: true
@@ -20,27 +20,23 @@ architecture:
   hidden_dim: 256
 
 sac:
-  lr: 1e-4
+  lr: 2e-5
   gamma: 0.99
-  tau: 0.005
+  tau: 0.002
   batch_size: 256
-  buffer_size: 500000   # con StackedReplayBuffer guarda frames individuales
-                        # 500k × 3ch × 84 × 84 ≈ 10 GB en lugar de 40 GB
+  buffer_size: 300000
   train_freq: 1
-  gradient_steps: 1
   target_update_interval: 1
   ent_coef: auto
 
 train:
-  total_steps: 3000000
-  gradient_steps: 1
+  total_steps: 1500000
+  gradient_steps: 2
   learning_starts: 50000
   checkpoint_freq: 200000
-  video_freq: 100000
-  num_videos: 4
-  eval_freq: 50000
+  eval_freq: 100000
   eval_episodes: 3
 
 logging:
   save_freq: 100000
-  log_dir: runs/sac
+  log_dir: runs/ppo

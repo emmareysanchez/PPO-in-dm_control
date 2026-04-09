@@ -4,7 +4,6 @@ import argparse
 import os
 import random
 import time
-from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -15,12 +14,9 @@ import torch
 import yaml
 from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import BaseCallback
-from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm
+from stable_baselines3.common.evaluation import evaluate_policy
 
-from jimena.src.sac.env import make_eval_env, make_train_env
-from jimena.src.sac.replay_buffer import StackedReplayBuffer
-from jimena.src.sac.utils import resolve_env_spec, resolve_seed
+from env import EnvSpec, make_eval_env, make_train_env, resolve_env_spec
 
 
 def load_yaml(path: str) -> dict[str, Any]:
@@ -29,180 +25,75 @@ def load_yaml(path: str) -> dict[str, Any]:
 
 
 def resolve_device(cfg: dict[str, Any]) -> str:
-    name = str(cfg.get("device") or cfg.get("experiment", {}).get("device", "cpu"))
-    if name == "cuda" and not torch.cuda.is_available():
+    device = str(cfg.get("experiment", {}).get("device", "cpu"))
+    if device == "cuda" and not torch.cuda.is_available():
         return "cpu"
-    return name
+    return device
 
 
-def resolve_train_params(cfg: dict[str, Any]) -> dict[str, Any]:
-    t = cfg.get("train", {})
-    l = cfg.get("logging", {})
-    e = cfg.get("environment", cfg.get("env", {}))
-    return {
-        "total_steps":     int(t.get("total_steps",     1_000_000)),
-        "gradient_steps":  int(t.get("gradient_steps",  1)),
-        "learning_starts": int(t.get("learning_starts", 50_000)),
-        "checkpoint_freq": int(t.get("checkpoint_freq", l.get("save_freq", 50_000))),
-        "video_freq":      int(t.get("video_freq",      l.get("save_freq", 50_000))),
-        "num_videos":      int(t.get("num_videos",      4)),
-        "eval_freq":       int(t.get("eval_freq",       10_000)),
-        "eval_episodes":   int(t.get("eval_episodes",   5)),
-        "n_envs":          int(e.get("n_envs",          1)),
-    }
+def resolve_seed(cfg: dict[str, Any]) -> int:
+    return int(cfg.get("experiment", {}).get("seed", 0))
 
 
-class MasterCallback(BaseCallback):
+class SaveEvalCallback(BaseCallback):
     def __init__(
         self,
-        writer: SummaryWriter,
-        env_spec,
+        env_spec: EnvSpec,
         seed: int,
-        video_dir: Path,
         ckpt_dir: Path,
+        video_dir: Path,
         checkpoint_freq: int,
-        video_freq: int,
-        num_videos: int,
         eval_freq: int,
         eval_episodes: int,
-        total_steps: int,
+        verbose: int = 1,
     ) -> None:
-        super().__init__(verbose=0)
-        self.writer        = writer
-        self.env_spec      = env_spec
-        self.seed          = int(seed)
-        self.video_dir     = video_dir
-        self.ckpt_dir      = ckpt_dir
+        super().__init__(verbose=verbose)
+        self.env_spec = env_spec
+        self.seed = int(seed)
+        self.ckpt_dir = ckpt_dir
+        self.video_dir = video_dir
         self.checkpoint_freq = int(checkpoint_freq)
-        self.video_freq    = int(video_freq)
-        self.num_videos    = int(num_videos)
-        self.eval_freq     = int(eval_freq)
+        self.eval_freq = int(eval_freq)
         self.eval_episodes = int(eval_episodes)
 
-        self._ep_rewards: list[float] | None = None
-        self._ep_lengths: list[int]   | None = None
-        self._ep_idx  = 0
-        self._recent: deque[float] = deque(maxlen=10)
-        self._last_losses: dict[str, float] = {}
-
-        self._pbar = tqdm(
-            total=int(total_steps),
-            desc="Training",
-            unit="step",
-            dynamic_ncols=True,
-            colour="cyan",
-        )
-
     def _on_step(self) -> bool:
-        t      = int(self.num_timesteps)
-        rewards = self.locals["rewards"]
-        dones   = self.locals["dones"]
-        infos   = self.locals.get("infos", [])
-        n_envs  = len(rewards)
+        step = int(self.num_timesteps)
 
-        if self._ep_rewards is None:
-            self._ep_rewards = [0.0] * n_envs
-            self._ep_lengths = [0]   * n_envs
+        if self.checkpoint_freq > 0 and step % self.checkpoint_freq == 0:
+            save_path = self.ckpt_dir / f"step_{step}"
+            self.model.save(str(save_path))
+            if self.verbose:
+                print(f"[checkpoint] saved: {save_path}.zip")
 
-        assert self._ep_lengths is not None
-
-        for i in range(n_envs):
-            self._ep_rewards[i] += float(rewards[i])
-            self._ep_lengths[i] += 1
-
-            if bool(dones[i]):
-                self._ep_idx += 1
-                ep_r = self._ep_rewards[i]
-                ep_l = self._ep_lengths[i]
-
-                ep_info = infos[i].get("episode") if i < len(infos) else None
-                if isinstance(ep_info, dict):
-                    ep_r = float(ep_info.get("r", ep_r))
-                    ep_l = int(ep_info.get("l", ep_l))
-
-                self._recent.append(ep_r)
-                self.writer.add_scalar("train/episode_reward", ep_r, t)
-                self.writer.add_scalar("train/episode_length", ep_l, t)
-                self.writer.add_scalar("train/episode_index",  self._ep_idx, t)
-
-                self._ep_rewards[i] = 0.0
-                self._ep_lengths[i] = 0
-
-        if t % self.checkpoint_freq == 0:
-            self.model.save(str(self.ckpt_dir / f"step_{t}"))
-
-        if t % self.video_freq == 0:
-            step_dir = self.video_dir / f"step_{t}"
-            step_dir.mkdir(parents=True, exist_ok=True)
-            self._record_videos(str(step_dir), seed_offset=t)
-
-        if t % self.eval_freq == 0:
-            eval_video_dir = str(self.video_dir / "eval" / f"step_{t}")
-            returns = self._run_eval(eval_video_dir, seed_offset=t)
-            for i, v in enumerate(returns):
-                self.writer.add_scalar("eval/episode_reward", float(v), t + i)
-            self.writer.add_scalar("eval/mean_episode_reward", float(np.mean(returns)), t)
-            self.writer.add_scalar("eval/std_episode_reward",  float(np.std(returns)),  t)
-
-        if hasattr(self.model, "logger") and self.model.logger is not None:
-            for key in ("train/actor_loss", "train/critic_loss",
-                        "train/ent_coef_loss", "train/ent_coef"):
-                value = self.model.logger.name_to_value.get(key)
-                if value is not None:
-                    new_val = float(value)
-                    if self._last_losses.get(key) != new_val:
-                        self.writer.add_scalar(key, new_val, t)
-                        self._last_losses[key] = new_val
-
-        self._pbar.n = min(t, self._pbar.total)
-        self._pbar.refresh()
-        if self._recent:
-            self._pbar.set_postfix(
-                ep=self._ep_idx,
-                ret=f"{float(np.mean(self._recent)):.1f}",
-                best=f"{max(self._recent):.1f}",
+        if self.eval_freq > 0 and step % self.eval_freq == 0:
+            eval_env = make_eval_env(
+                spec=self.env_spec,
+                seed=self.seed + step,
+                video_dir=str(self.video_dir / f"step_{step}"),
             )
+            mean_reward, std_reward = evaluate_policy(
+                self.model,
+                eval_env,
+                n_eval_episodes=self.eval_episodes,
+                deterministic=True,
+                render=False,
+            )
+            eval_env.close()
+            if self.verbose:
+                print(
+                    f"[eval] step={step}  "
+                    f"mean_reward={float(mean_reward):.2f}  "
+                    f"std_reward={float(std_reward):.2f}"
+                )
+
         return True
 
-    def _on_training_end(self) -> None:
-        self._pbar.close()
-        self.writer.flush()
 
-    def _run_eval(self, video_dir: str, seed_offset: int) -> list[float]:
-        env = make_eval_env(spec=self.env_spec, seed=self.seed + seed_offset, video_dir=video_dir)
-        returns: list[float] = []
-        with torch.no_grad():
-            for _ in range(self.eval_episodes):
-                obs, _ = env.reset()
-                done, total = False, 0.0
-                while not done:
-                    action, _ = self.model.predict(obs, deterministic=True)
-                    obs, reward, terminated, truncated, _ = env.step(action)
-                    done = bool(terminated or truncated)
-                    total += float(reward)
-                returns.append(total)
-        env.close()
-        return returns
-
-    def _record_videos(self, video_dir: str, seed_offset: int) -> None:
-        env = make_eval_env(spec=self.env_spec, seed=self.seed + seed_offset, video_dir=video_dir)
-        with torch.no_grad():
-            for _ in range(self.num_videos):
-                obs, _ = env.reset()
-                done = False
-                while not done:
-                    action, _ = self.model.predict(obs, deterministic=True)
-                    obs, _r, terminated, truncated, _ = env.step(action)
-                    done = bool(terminated or truncated)
-        env.close()
-
-
-def main(config_path: str = "configs/sac.yaml") -> None:
-    cfg          = load_yaml(config_path)
-    device       = resolve_device(cfg)
-    seed         = resolve_seed(cfg)
-    env_spec     = resolve_env_spec(cfg)
-    train_params = resolve_train_params(cfg)
+def main(config_path: str) -> None:
+    cfg = load_yaml(config_path)
+    seed = resolve_seed(cfg)
+    device = resolve_device(cfg)
+    env_spec = resolve_env_spec(cfg)
 
     random.seed(seed)
     np.random.seed(seed)
@@ -211,80 +102,73 @@ def main(config_path: str = "configs/sac.yaml") -> None:
         torch.cuda.manual_seed_all(seed)
 
     run_name = time.strftime("%Y-%m-%d_%H-%M-%S")
-    run_dir  = Path("runs")        / "sac" / run_name
-    video_dir = Path("videos")     / "sac" / run_name
-    ckpt_dir  = Path("checkpoints") / "sac" / run_name
-    for d in (run_dir, video_dir, ckpt_dir):
+    run_dir  = Path("runs")         / "sac" / run_name
+    ckpt_dir = Path("checkpoints")  / "sac" / run_name
+    video_dir = Path("videos")      / "sac" / run_name
+    for d in (run_dir, ckpt_dir, video_dir):
         d.mkdir(parents=True, exist_ok=True)
 
-    writer    = SummaryWriter(log_dir=str(run_dir))
-    n_envs    = int(train_params["n_envs"])
-    train_env = make_train_env(spec=env_spec, seed=seed, n_envs=n_envs)
+    train_env = make_train_env(spec=env_spec, seed=seed)
 
-    sac_cfg    = cfg.get("sac", {})
-    hidden_dim = int(cfg.get("architecture", {}).get("hidden_dim", 256))
-    buffer_size = int(sac_cfg.get("buffer_size", 300_000))
-    batch_size  = int(sac_cfg.get("batch_size",  256))
-    ent_coef    = sac_cfg.get("ent_coef", "auto")
+    sac_cfg   = cfg["sac"]
+    train_cfg = cfg["train"]
+    arch_cfg  = cfg.get("architecture", {})
 
+    hidden_dim = int(arch_cfg.get("hidden_dim", 256))
     model = SAC(
         policy="CnnPolicy",
         env=train_env,
         learning_rate=float(sac_cfg.get("lr", 1e-4)),
-        buffer_size=buffer_size,
-        batch_size=batch_size,
+        buffer_size=int(sac_cfg.get("buffer_size", 100_000)),
+        batch_size=int(sac_cfg.get("batch_size", 256)),
         tau=float(sac_cfg.get("tau", 0.005)),
         gamma=float(sac_cfg.get("gamma", 0.99)),
         train_freq=int(sac_cfg.get("train_freq", 1)),
-        gradient_steps=int(train_params["gradient_steps"]),
-        learning_starts=int(train_params["learning_starts"]),
-        ent_coef=ent_coef,
+        gradient_steps=int(train_cfg.get("gradient_steps", 1)),
+        learning_starts=int(train_cfg.get("learning_starts", 25_000)),
+        ent_coef=sac_cfg.get("ent_coef", "auto"),
         target_update_interval=int(sac_cfg.get("target_update_interval", 1)),
         policy_kwargs={
             "net_arch": [hidden_dim, hidden_dim],
-            "features_extractor_kwargs": {"features_dim": 512},
+            "features_extractor_kwargs": {"features_dim": 256},
         },
-        replay_buffer_class=StackedReplayBuffer,
-        replay_buffer_kwargs={"frame_stack": int(env_spec.frame_stack)},
-        tensorboard_log=None,
+        tensorboard_log=str(run_dir),
         device=device,
         seed=seed,
-        verbose=0,
+        verbose=1,
     )
 
-    callback = MasterCallback(
-        writer=writer,
+    callback = SaveEvalCallback(
         env_spec=env_spec,
         seed=seed,
-        video_dir=video_dir,
         ckpt_dir=ckpt_dir,
-        checkpoint_freq=train_params["checkpoint_freq"],
-        video_freq=train_params["video_freq"],
-        num_videos=train_params["num_videos"],
-        eval_freq=train_params["eval_freq"],
-        eval_episodes=train_params["eval_episodes"],
-        total_steps=train_params["total_steps"],
+        video_dir=video_dir,
+        checkpoint_freq=int(train_cfg.get("checkpoint_freq", 200_000)),
+        eval_freq=int(train_cfg.get("eval_freq", 100_000)),
+        eval_episodes=int(train_cfg.get("eval_episodes", 3)),
+        verbose=1,
     )
 
     model.learn(
-        total_timesteps=int(train_params["total_steps"]),
+        total_timesteps=int(train_cfg.get("total_steps", 1_500_000)),
         callback=callback,
+        tb_log_name="sac",
         reset_num_timesteps=True,
-        tb_log_name=".",
     )
 
-    model.save(str(ckpt_dir / "final"))
+    final_path = ckpt_dir / "final"
+    model.save(str(final_path))
     train_env.close()
-    writer.close()
 
-    print(f"\nTraining complete — run: {run_name}")
-    print(f"  TensorBoard : tensorboard --logdir runs/sac/{run_name}")
-    print(f"  Checkpoints : checkpoints/sac/{run_name}/")
-    print(f"  Videos      : videos/sac/{run_name}/")
+    print("\nTraining complete")
+    print(f"TensorBoard : tensorboard --logdir {run_dir}")
+    print(f"Final model : {final_path}.zip")
+    print(f"Checkpoints : {ckpt_dir}")
+    print(f"Videos      : {video_dir}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="config/sac.yaml")
+    parser.add_argument("--config", type=str, default="sac.yaml")
     args = parser.parse_args()
-    main(config_path=str(args.config))
+    main(config_path=args.config)

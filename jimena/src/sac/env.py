@@ -2,52 +2,65 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any
 
 import cv2
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from gymnasium.wrappers import RecordVideo, TimeLimit
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
+from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
 
-from jimena.src.sac.reward import RewardShaping
+from jimena.src.sac.reward import WalkerRewardShaping
 
 
 @dataclass
 class EnvSpec:
-    env_id: str
-    frame_stack: int
-    action_repeat: int
-    time_limit: int
-    obs_h: int
-    obs_w: int
-    grayscale: bool = False
+    env_id: str = "Walker2d-v5"
+    frame_stack: int = 3
+    action_repeat: int = 1
+    time_limit: int = 1000
+    obs_h: int = 64
+    obs_w: int = 64
+    grayscale: bool = True
     reward_shaping: bool = True
     terminate_when_unhealthy: bool = True
     healthy_z_range: tuple[float, float] = field(default_factory=lambda: (0.8, 2.0))
-    action_prototypes: list[list[float]] | None = None
+
+
+def resolve_env_spec(cfg: dict[str, Any]) -> EnvSpec:
+    env_cfg = cfg["environment"]
+    hz = env_cfg.get("healthy_z_range", [0.8, 2.0])
+    return EnvSpec(
+        env_id=str(env_cfg.get("env_id", "Walker2d-v5")),
+        frame_stack=int(env_cfg.get("frame_stack", 3)),
+        action_repeat=int(env_cfg.get("action_repeat", 1)),
+        time_limit=int(env_cfg.get("time_limit", 1000)),
+        obs_h=int(env_cfg.get("obs_h", 64)),
+        obs_w=int(env_cfg.get("obs_w", 64)),
+        grayscale=bool(env_cfg.get("grayscale", True)),
+        reward_shaping=bool(env_cfg.get("reward_shaping", True)),
+        terminate_when_unhealthy=bool(env_cfg.get("terminate_when_unhealthy", True)),
+        healthy_z_range=(float(hz[0]), float(hz[1])),
+    )
 
 
 class PixelStackWrapper(gym.Wrapper):
     """
-    Render -> resize -> (optional grayscale) -> stack K frames on channel axis.
-    Output shape: (C*K, H, W)  where C=1 (grayscale) or C=3 (RGB).
-
-    Action repeat is handled here so reward accumulation happens
-    before the frame is captured — matches the working reference implementation.
+    Render -> resize -> optional grayscale -> stack K frames on channel axis.
+    Output shape: (C*K, H, W), where C=1 for grayscale and C=3 for RGB.
     """
 
     def __init__(
         self,
         env: gym.Env,
-        k: int = 4,
-        height: int = 84,
-        width: int = 84,
-        grayscale: bool = False,
+        k: int = 3,
+        height: int = 64,
+        width: int = 64,
+        grayscale: bool = True,
         action_repeat: int = 1,
     ) -> None:
-        super().__init__(env=env)
+        super().__init__(env)
         self.k = int(k)
         self.height = int(height)
         self.width = int(width)
@@ -56,11 +69,11 @@ class PixelStackWrapper(gym.Wrapper):
 
         self._frames: deque[np.ndarray] = deque(maxlen=self.k)
 
-        c = 1 if self.grayscale else 3
+        channels = 1 if self.grayscale else 3
         self.observation_space = spaces.Box(
             low=0,
             high=255,
-            shape=(c * self.k, self.height, self.width),
+            shape=(channels * self.k, self.height, self.width),
             dtype=np.uint8,
         )
 
@@ -71,13 +84,13 @@ class PixelStackWrapper(gym.Wrapper):
         frame = cv2.resize(frame, (self.width, self.height), interpolation=cv2.INTER_AREA)
         if self.grayscale:
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-            return frame[None, :, :].astype(np.uint8)           # (1, H, W)
-        return np.transpose(frame, (2, 0, 1)).astype(np.uint8)  # (3, H, W)
+            return frame[None, :, :].astype(np.uint8)
+        return np.transpose(frame, (2, 0, 1)).astype(np.uint8)
 
     def _get_obs(self) -> np.ndarray:
         return np.concatenate(list(self._frames), axis=0)
 
-    def reset(self, **kwargs) -> tuple[np.ndarray, dict]:
+    def reset(self, **kwargs):
         _, info = self.env.reset(**kwargs)
         frame = self._get_frame()
         self._frames.clear()
@@ -85,7 +98,7 @@ class PixelStackWrapper(gym.Wrapper):
             self._frames.append(frame)
         return self._get_obs(), info
 
-    def step(self, action) -> tuple[np.ndarray, float, bool, bool, dict]:
+    def step(self, action):
         total_reward = 0.0
         terminated = False
         truncated = False
@@ -101,11 +114,7 @@ class PixelStackWrapper(gym.Wrapper):
         return self._get_obs(), total_reward, bool(terminated), bool(truncated), info
 
 
-# ---------------------------------------------------------------------------
-# Environment stack
-# ---------------------------------------------------------------------------
-
-def _build_env_stack(spec: EnvSpec, seed: int) -> gym.Env:
+def build_env(spec: EnvSpec, seed: int) -> gym.Env:
     env = gym.make(
         spec.env_id,
         render_mode="rgb_array",
@@ -115,54 +124,36 @@ def _build_env_stack(spec: EnvSpec, seed: int) -> gym.Env:
     env.reset(seed=int(seed))
     env.action_space.seed(int(seed))
 
-    # 1. Statistics — must be BEFORE reward shaping so logged rewards are shaped
     env = gym.wrappers.RecordEpisodeStatistics(env)
 
-    # 2. Reward shaping — independent wrapper applied BEFORE pixels,
-    #    matching the working reference (ProgressWithSafetyShapingNew)
     if spec.reward_shaping:
-        env = RewardShaping(env)
+        env = WalkerRewardShaping(env)
 
-    # 3. Pixels + frame stack + action repeat — unified wrapper
     env = PixelStackWrapper(
         env=env,
-        k=int(spec.frame_stack),
-        height=int(spec.obs_h),
-        width=int(spec.obs_w),
-        grayscale=bool(spec.grayscale),
-        action_repeat=int(spec.action_repeat),
+        k=spec.frame_stack,
+        height=spec.obs_h,
+        width=spec.obs_w,
+        grayscale=spec.grayscale,
+        action_repeat=spec.action_repeat,
     )
-
-    # 4. Hard episode length cap
-    env = TimeLimit(env=env, max_episode_steps=int(spec.time_limit))
+    env = TimeLimit(env, max_episode_steps=spec.time_limit)
     return env
 
 
-def _make_env_fn(spec: EnvSpec, seed: int) -> Callable[[], gym.Env]:
-    def _thunk() -> gym.Env:
-        return _build_env_stack(spec=spec, seed=seed)
-    return _thunk
+def make_train_env(spec: EnvSpec, seed: int):
+    def _make():
+        return build_env(spec=spec, seed=seed)
 
-
-def make_train_env(spec: EnvSpec, seed: int, n_envs: int = 1):
-    """
-    SAC is off-policy — a single environment is standard.
-    n_envs > 1 is supported but uncommon.
-    """
-    if int(n_envs) <= 1:
-        env = DummyVecEnv([_make_env_fn(spec=spec, seed=seed)])
-    else:
-        env_fns = [_make_env_fn(spec=spec, seed=seed + i) for i in range(int(n_envs))]
-        env = SubprocVecEnv(env_fns)
-    return VecMonitor(env)
+    return VecMonitor(DummyVecEnv([_make]))
 
 
 def make_eval_env(spec: EnvSpec, seed: int, video_dir: str) -> gym.Env:
-    env = _build_env_stack(spec=spec, seed=seed)
+    env = build_env(spec=spec, seed=seed)
     return RecordVideo(
         env=env,
         video_folder=video_dir,
-        episode_trigger=lambda ep: True,
+        episode_trigger=lambda episode_id: True,
         name_prefix="eval",
         disable_logger=True,
     )
