@@ -7,28 +7,32 @@ environment:
   env_id: Walker2d-v5
   obs_h: 84
   obs_w: 84
-  frame_stack: 3
+  frame_stack: 4
   grayscale: false
   action_repeat: 2
   time_limit: 1000
   n_envs: 1
+  reward_shaping: true
+  terminate_when_unhealthy: true
+  healthy_z_range: [0.8, 2.0]
 
 architecture:
   hidden_dim: 256
 
 sac:
-  lr: 2e-5
+  lr: 1e-4
   gamma: 0.99
-  tau: 0.002
+  tau: 0.005
   batch_size: 256
-  buffer_size: 300000
+  buffer_size: 1000000
   train_freq: 1
+  gradient_steps: 1
   target_update_interval: 1
   ent_coef: auto
 
 train:
   total_steps: 3000000
-  gradient_steps: 2
+  gradient_steps: 1
   learning_starts: 50000
   checkpoint_freq: 200000
   video_freq: 100000
