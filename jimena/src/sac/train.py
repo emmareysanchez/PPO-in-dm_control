@@ -16,7 +16,7 @@ from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 
-from env import EnvSpec, make_eval_env, make_train_env, resolve_env_spec
+from jimena.src.sac.env import EnvSpec, make_eval_env, make_train_env, resolve_env_spec
 
 
 def load_yaml(path: str) -> dict[str, Any]:

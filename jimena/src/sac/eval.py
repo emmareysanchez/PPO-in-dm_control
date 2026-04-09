@@ -8,7 +8,7 @@ import numpy as np
 import yaml
 from stable_baselines3 import SAC
 
-from env import make_eval_env, resolve_env_spec
+from jimena.src.sac.env import make_eval_env, resolve_env_spec
 
 
 def load_yaml(path: str) -> dict[str, Any]:
