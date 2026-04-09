@@ -15,6 +15,7 @@ import yaml
 from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
+from tqdm import tqdm
 
 from jimena.src.sac.env import EnvSpec, make_eval_env, make_train_env, resolve_env_spec
 
@@ -45,9 +46,9 @@ class SaveEvalCallback(BaseCallback):
         checkpoint_freq: int,
         eval_freq: int,
         eval_episodes: int,
-        verbose: int = 1,
+        total_steps: int,
     ) -> None:
-        super().__init__(verbose=verbose)
+        super().__init__(verbose=0)
         self.env_spec = env_spec
         self.seed = int(seed)
         self.ckpt_dir = ckpt_dir
@@ -56,14 +57,21 @@ class SaveEvalCallback(BaseCallback):
         self.eval_freq = int(eval_freq)
         self.eval_episodes = int(eval_episodes)
 
+        self._pbar = tqdm(
+            total=int(total_steps),
+            desc="Training",
+            unit="step",
+            dynamic_ncols=True,
+        )
+
     def _on_step(self) -> bool:
         step = int(self.num_timesteps)
 
+        self._pbar.n = step
+        self._pbar.refresh()
+
         if self.checkpoint_freq > 0 and step % self.checkpoint_freq == 0:
-            save_path = self.ckpt_dir / f"step_{step}"
-            self.model.save(str(save_path))
-            if self.verbose:
-                print(f"[checkpoint] saved: {save_path}.zip")
+            self.model.save(str(self.ckpt_dir / f"step_{step}"))
 
         if self.eval_freq > 0 and step % self.eval_freq == 0:
             eval_env = make_eval_env(
@@ -79,14 +87,15 @@ class SaveEvalCallback(BaseCallback):
                 render=False,
             )
             eval_env.close()
-            if self.verbose:
-                print(
-                    f"[eval] step={step}  "
-                    f"mean_reward={float(mean_reward):.2f}  "
-                    f"std_reward={float(std_reward):.2f}"
-                )
+            self._pbar.set_postfix(
+                eval=f"{float(mean_reward):.1f}",
+                std=f"{float(std_reward):.1f}",
+            )
 
         return True
+
+    def _on_training_end(self) -> None:
+        self._pbar.close()
 
 
 def main(config_path: str) -> None:
@@ -101,9 +110,9 @@ def main(config_path: str) -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-    run_name = time.strftime("%Y-%m-%d_%H-%M-%S")
-    run_dir  = Path("runs")         / "sac" / run_name
-    ckpt_dir = Path("checkpoints")  / "sac" / run_name
+    run_name  = time.strftime("%Y-%m-%d_%H-%M-%S")
+    run_dir   = Path("runs")        / "sac" / run_name
+    ckpt_dir  = Path("checkpoints") / "sac" / run_name
     video_dir = Path("videos")      / "sac" / run_name
     for d in (run_dir, ckpt_dir, video_dir):
         d.mkdir(parents=True, exist_ok=True)
@@ -114,7 +123,9 @@ def main(config_path: str) -> None:
     train_cfg = cfg["train"]
     arch_cfg  = cfg.get("architecture", {})
 
-    hidden_dim = int(arch_cfg.get("hidden_dim", 256))
+    hidden_dim  = int(arch_cfg.get("hidden_dim", 256))
+    total_steps = int(train_cfg.get("total_steps", 1_500_000))
+
     model = SAC(
         policy="CnnPolicy",
         env=train_env,
@@ -135,7 +146,7 @@ def main(config_path: str) -> None:
         tensorboard_log=str(run_dir),
         device=device,
         seed=seed,
-        verbose=1,
+        verbose=0,
     )
 
     callback = SaveEvalCallback(
@@ -146,11 +157,11 @@ def main(config_path: str) -> None:
         checkpoint_freq=int(train_cfg.get("checkpoint_freq", 200_000)),
         eval_freq=int(train_cfg.get("eval_freq", 100_000)),
         eval_episodes=int(train_cfg.get("eval_episodes", 3)),
-        verbose=1,
+        total_steps=total_steps,
     )
 
     model.learn(
-        total_timesteps=int(train_cfg.get("total_steps", 1_500_000)),
+        total_timesteps=total_steps,
         callback=callback,
         tb_log_name="sac",
         reset_num_timesteps=True,
@@ -160,7 +171,7 @@ def main(config_path: str) -> None:
     model.save(str(final_path))
     train_env.close()
 
-    print("\nTraining complete")
+    print(f"\nTraining complete")
     print(f"TensorBoard : tensorboard --logdir {run_dir}")
     print(f"Final model : {final_path}.zip")
     print(f"Checkpoints : {ckpt_dir}")
