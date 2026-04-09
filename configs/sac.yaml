@@ -30,7 +30,7 @@ sac:
   ent_coef: auto
 
 train:
-  total_steps: 1500000
+  total_steps: 5000000
   gradient_steps: 2
   learning_starts: 50000
   checkpoint_freq: 200000
@@ -39,4 +39,4 @@ train:
 
 logging:
   save_freq: 100000
-  log_dir: runs/ppo
+  log_dir: runs/sac
