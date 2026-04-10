@@ -19,41 +19,6 @@ from tqdm import tqdm
 
 from jimena.src.sac.env import EnvSpec, make_eval_env, make_train_env, resolve_env_spec
 
-def grad_norm(parameters):
-    total_norm = 0.0
-    has_grad = False
-
-    for p in parameters:
-        if p.grad is not None:
-            total_norm += p.grad.data.norm(2).item() ** 2
-            has_grad = True
-
-    if not has_grad:
-        return 0.0
-
-    return total_norm ** 0.5
-
-class GradientDebugCallback(BaseCallback):
-    def __init__(self):
-        super().__init__()
-
-    def _on_step(self) -> bool:
-
-        # solo cuando empieza el entrenamiento real (después de learning_starts)
-        if hasattr(self.model, "actor") and self.model.actor is not None:
-
-            actor_g = grad_norm(self.model.actor.parameters())
-            critic_g = grad_norm(self.model.critic.parameters())
-
-            print(
-                f"step={self.num_timesteps} | "
-                f"actor_grad={actor_g:.6f} | "
-                f"critic_grad={critic_g:.6f}"
-            )
-
-        return True
-
-
 def load_yaml(path: str) -> dict[str, Any]:
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -196,7 +161,7 @@ def main(config_path: str) -> None:
 
     model.learn(
         total_timesteps=total_steps,
-        callback=CallbackList([callback, GradientDebugCallback()]),
+        callback=callback,
         tb_log_name="sac",
         reset_num_timesteps=True,
     )
