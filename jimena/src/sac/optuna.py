@@ -182,9 +182,13 @@ def main(config_path: str) -> None:
     def wrapped_objective(trial: optuna.Trial) -> float:
         result = objective(trial=trial, env_spec=env_spec, device=device, seed=seed)
         outer_pbar.update(1)
-        if study.best_trial.number == trial.number:
-            save_best_params(study.best_trial)
-        outer_pbar.set_postfix(best=f"{study.best_value:.2f}" if study.trials else "—")
+        try:
+            best = study.best_trial
+            if best.number == trial.number:
+                save_best_params(best)
+            outer_pbar.set_postfix(best=f"{study.best_value:.2f}")
+        except ValueError:
+            pass  # primer trial aun no registrado como best
         return result
 
     study.optimize(wrapped_objective, n_trials=N_TRIALS, gc_after_trial=True)
