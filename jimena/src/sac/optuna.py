@@ -24,7 +24,7 @@ from jimena.src.sac.env import EnvSpec, make_eval_env, make_train_env, resolve_e
 # Config
 # ---------------------------------------------------------------------------
 
-TRIAL_STEPS   = 200_000   # steps por trial
+TRIAL_STEPS   = 500_000   # steps por trial
 N_TRIALS      = 30        # trials totales (~20-24h con GPU)
 EVAL_EPISODES = 5         # episodios de evaluación al final de cada trial
 STUDY_NAME    = "sac_walker"
@@ -62,18 +62,17 @@ class TrialProgressCallback(BaseCallback):
 
 def objective(trial: optuna.Trial, env_spec: EnvSpec, device: str, seed: int) -> float:
     # --- sample hyperparameters ---
-    lr              = trial.suggest_float("lr",              1e-5, 5e-4, log=True)
-    tau             = trial.suggest_float("tau",             0.001, 0.02, log=True)
-    gamma           = trial.suggest_float("gamma",           0.97, 0.999)
-    batch_size      = trial.suggest_categorical("batch_size",      [128, 256, 512])
-    buffer_size     = trial.suggest_categorical("buffer_size",     [50_000, 100_000, 200_000])
-    learning_starts = trial.suggest_categorical("learning_starts", [5_000, 10_000, 25_000])
-    gradient_steps  = trial.suggest_int("gradient_steps",   1, 4)
-    hidden_dim      = trial.suggest_categorical("hidden_dim",      [128, 256, 512])
+    lr              = trial.suggest_float("lr", 1e-5, 5e-4, log=True)
+    buffer_size     = trial.suggest_categorical("buffer_size", [50_000, 100_000, 200_000, 500_000])
+    learning_starts = trial.suggest_categorical("learning_starts", [5_000, 10_000, 25_000, 50_000])
 
     trial_seed = seed + trial.number
 
     train_env = make_train_env(spec=env_spec, seed=trial_seed)
+    batch_size=256
+    tau=0.002
+    gamma=0.99
+    gradient_steps=1
 
     model = SAC(
         policy="CnnPolicy",
@@ -89,7 +88,7 @@ def objective(trial: optuna.Trial, env_spec: EnvSpec, device: str, seed: int) ->
         ent_coef="auto",
         target_update_interval=1,
         policy_kwargs={
-            "net_arch": [hidden_dim, hidden_dim],
+            "net_arch": [256, 256],
             "features_extractor_kwargs": {"features_dim": 256},
         },
         device=device,
@@ -127,7 +126,7 @@ def objective(trial: optuna.Trial, env_spec: EnvSpec, device: str, seed: int) ->
         f"std={float(std_reward):>6.2f}  "
         f"lr={lr:.2e}  tau={tau:.4f}  gamma={gamma:.4f}  "
         f"batch={batch_size}  buf={buffer_size}  "
-        f"starts={learning_starts}  grad_steps={gradient_steps}  hidden={hidden_dim}"
+        f"starts={learning_starts}  grad_steps={gradient_steps}  hidden={256}"
     )
 
     return float(mean_reward)
