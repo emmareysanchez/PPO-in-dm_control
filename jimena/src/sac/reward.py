@@ -18,12 +18,29 @@ def walker2d_reward(
 
     z = float(data.qpos[1])
     ang = float(data.qpos[2])
-    z_vel = float(data.qvel[1])
+    x_vel = float(data.qvel[0])   # velocidad hacia delante
+    action = np.asarray(action, dtype=np.float32)
 
-    posture_penalty = -0.05 * abs(ang)
-    low_height_penalty = -0.10 if z < 0.75 else 0.0
+    forward_bonus = 0.20 * np.tanh(x_vel)
+    posture_penalty = -0.03 * abs(ang)
+    low_height_penalty = -0.05 if z < 0.80 else 0.0
+    action_penalty = -0.001 * float(np.square(action).mean())
 
-    reward = float(env_reward) + posture_penalty + low_height_penalty
+    reward = (
+        float(env_reward)
+        + forward_bonus
+        + posture_penalty
+        + low_height_penalty
+        + action_penalty
+    )
+
+    info["reward/base"] = float(env_reward)
+    info["reward/forward_bonus"] = float(forward_bonus)
+    info["reward/posture_penalty"] = float(posture_penalty)
+    info["reward/low_height_penalty"] = float(low_height_penalty)
+    info["reward/action_penalty"] = float(action_penalty)
+
     return float(reward)
+
 
 walker2d_default_reward = walker2d_reward
