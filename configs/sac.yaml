@@ -5,8 +5,8 @@ experiment:
 
 environment:
   env_id: Walker2d-v5
-  obs_h: 84
-  obs_w: 84
+  obs_h: 64
+  obs_w: 64
   frame_stack: 3
   grayscale: true
   action_repeat: 1

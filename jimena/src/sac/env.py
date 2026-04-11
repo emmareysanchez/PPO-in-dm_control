@@ -20,8 +20,8 @@ class EnvSpec:
     frame_stack: int = 3
     action_repeat: int = 1
     time_limit: int = 1000
-    obs_h: int = 84
-    obs_w: int = 84
+    obs_h: int = 64
+    obs_w: int = 64
     grayscale: bool = True
     reward_shaping: bool = True
     terminate_when_unhealthy: bool = True
@@ -36,8 +36,8 @@ def resolve_env_spec(cfg: dict[str, Any]) -> EnvSpec:
         frame_stack=int(env_cfg.get("frame_stack", 3)),
         action_repeat=int(env_cfg.get("action_repeat", 1)),
         time_limit=int(env_cfg.get("time_limit", 1000)),
-        obs_h=int(env_cfg.get("obs_h", 84)),
-        obs_w=int(env_cfg.get("obs_w", 84)),
+        obs_h=int(env_cfg.get("obs_h", 64)),
+        obs_w=int(env_cfg.get("obs_w", 64)),
         grayscale=bool(env_cfg.get("grayscale", True)),
         reward_shaping=bool(env_cfg.get("reward_shaping", True)),
         terminate_when_unhealthy=bool(env_cfg.get("terminate_when_unhealthy", True)),
@@ -55,8 +55,8 @@ class PixelStackWrapper(gym.Wrapper):
         self,
         env: gym.Env,
         k: int = 3,
-        height: int = 84,
-        width: int = 84,
+        height: int = 64,
+        width: int = 64,
         grayscale: bool = True,
         action_repeat: int = 1,
     ) -> None:
