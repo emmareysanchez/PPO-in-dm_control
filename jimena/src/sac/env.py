@@ -20,8 +20,8 @@ class EnvSpec:
     frame_stack: int = 3
     action_repeat: int = 1
     time_limit: int = 1000
-    obs_h: int = 64
-    obs_w: int = 64
+    obs_h: int = 84
+    obs_w: int = 84
     grayscale: bool = True
     reward_shaping: bool = True
     terminate_when_unhealthy: bool = True
@@ -36,8 +36,8 @@ def resolve_env_spec(cfg: dict[str, Any]) -> EnvSpec:
         frame_stack=int(env_cfg.get("frame_stack", 3)),
         action_repeat=int(env_cfg.get("action_repeat", 1)),
         time_limit=int(env_cfg.get("time_limit", 1000)),
-        obs_h=int(env_cfg.get("obs_h", 64)),
-        obs_w=int(env_cfg.get("obs_w", 64)),
+        obs_h=int(env_cfg.get("obs_h", 84)),
+        obs_w=int(env_cfg.get("obs_w", 84)),
         grayscale=bool(env_cfg.get("grayscale", True)),
         reward_shaping=bool(env_cfg.get("reward_shaping", True)),
         terminate_when_unhealthy=bool(env_cfg.get("terminate_when_unhealthy", True)),
@@ -55,8 +55,8 @@ class PixelStackWrapper(gym.Wrapper):
         self,
         env: gym.Env,
         k: int = 3,
-        height: int = 64,
-        width: int = 64,
+        height: int = 84,
+        width: int = 84,
         grayscale: bool = True,
         action_repeat: int = 1,
     ) -> None:
@@ -71,24 +71,28 @@ class PixelStackWrapper(gym.Wrapper):
 
         channels = 1 if self.grayscale else 3
         self.observation_space = spaces.Box(
-            low=0,
-            high=255,
+            low=0.0,
+            high=1.0,
             shape=(channels * self.k, self.height, self.width),
-            dtype=np.uint8,
+            dtype=np.float32,
         )
 
     def _get_frame(self) -> np.ndarray:
         frame = self.unwrapped.render()
         if frame is None:
-            raise RuntimeError("env.render() returned None. Use render_mode='rgb_array'.")
-        frame = cv2.resize(frame, (self.width, self.height), interpolation=cv2.INTER_AREA)
+            raise RuntimeError(
+                "env.render() returned None. Use render_mode='rgb_array'."
+            )
+        frame = cv2.resize(
+            frame, (self.width, self.height), interpolation=cv2.INTER_AREA
+        )
         if self.grayscale:
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
             return frame[None, :, :].astype(np.uint8)
         return np.transpose(frame, (2, 0, 1)).astype(np.uint8)
 
     def _get_obs(self) -> np.ndarray:
-        return np.concatenate(list(self._frames), axis=0)
+        return np.concatenate(list(self._frames), axis=0) / 255.0
 
     def reset(self, **kwargs):
         _, info = self.env.reset(**kwargs)

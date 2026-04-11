@@ -13,11 +13,12 @@ import numpy as np
 import torch
 import yaml
 from stable_baselines3 import SAC
-from stable_baselines3.common.callbacks import BaseCallback, CallbackList
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 from tqdm import tqdm
 
 from jimena.src.sac.env import EnvSpec, make_eval_env, make_train_env, resolve_env_spec
+
 
 def load_yaml(path: str) -> dict[str, Any]:
     with open(path, encoding="utf-8") as f:
@@ -109,20 +110,20 @@ def main(config_path: str) -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-    run_name  = time.strftime("%Y-%m-%d_%H-%M-%S")
-    run_dir   = Path("runs")        / "sac" / run_name
-    ckpt_dir  = Path("checkpoints") / "sac" / run_name
-    video_dir = Path("videos")      / "sac" / run_name
+    run_name = time.strftime("%Y-%m-%d_%H-%M-%S")
+    run_dir = Path("runs") / "sac" / run_name
+    ckpt_dir = Path("checkpoints") / "sac" / run_name
+    video_dir = Path("videos") / "sac" / run_name
     for d in (run_dir, ckpt_dir, video_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     train_env = make_train_env(spec=env_spec, seed=seed)
 
-    sac_cfg   = cfg["sac"]
+    sac_cfg = cfg["sac"]
     train_cfg = cfg["train"]
-    arch_cfg  = cfg.get("architecture", {})
+    arch_cfg = cfg.get("architecture", {})
 
-    hidden_dim  = int(arch_cfg.get("hidden_dim", 256))
+    hidden_dim = int(arch_cfg.get("hidden_dim", 256))
     total_steps = int(train_cfg.get("total_steps", 1_500_000))
 
     model = SAC(
@@ -140,7 +141,8 @@ def main(config_path: str) -> None:
         target_update_interval=int(sac_cfg.get("target_update_interval", 1)),
         policy_kwargs={
             "net_arch": [hidden_dim, hidden_dim],
-            "features_extractor_kwargs": {"features_dim": 256},
+            "share_features_extractor": False,
+            "features_extractor_kwargs": {"features_dim": 512},
         },
         tensorboard_log=str(run_dir),
         device=device,
@@ -170,7 +172,7 @@ def main(config_path: str) -> None:
     model.save(str(final_path))
     train_env.close()
 
-    print(f"\nTraining complete")
+    print("\nTraining complete")
     print(f"TensorBoard : tensorboard --logdir {run_dir}")
     print(f"Final model : {final_path}.zip")
     print(f"Checkpoints : {ckpt_dir}")
