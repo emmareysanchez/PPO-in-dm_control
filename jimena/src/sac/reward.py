@@ -21,8 +21,8 @@ def walker2d_reward(
     x_vel = float(data.qvel[0])
     action = np.asarray(action, dtype=np.float32)
 
-    forward_bonus = 0.20 * np.tanh(x_vel)
-    posture_penalty = -0.03 * abs(ang)
+    forward_bonus = 0.40 * np.tanh(x_vel)
+    posture_penalty = -0.02 * abs(ang)
     low_height_penalty = -0.05 if z < 0.80 else 0.0
     action_penalty = -0.001 * float(np.square(action).mean())
 
@@ -40,7 +40,7 @@ def walker2d_reward(
     info["reward/posture_penalty"] = float(posture_penalty)
     info["reward/low_height_penalty"] = float(low_height_penalty)
     info["reward/action_penalty"] = float(action_penalty)
-
+    info["debug/x_vel"] = float(x_vel)
     return float(reward)
 
 

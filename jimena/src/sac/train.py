@@ -78,13 +78,36 @@ class SaveEvalCallback(BaseCallback):
                 seed=self.seed + step,
                 video_dir=str(self.video_dir / f"step_{step}"),
             )
-            mean_reward, std_reward = evaluate_policy(
-                self.model,
-                eval_env,
-                n_eval_episodes=self.eval_episodes,
-                deterministic=True,
-                render=False,
-            )
+            returns = []
+            xvels = []
+
+            for _ in range(self.eval_episodes):
+                obs, _ = eval_env.reset()
+                done = False
+                ep_reward = 0.0
+                ep_xvel = []
+
+                while not done:
+                    action, _ = self.model.predict(obs, deterministic=True)
+                    obs, reward, terminated, truncated, info = eval_env.step(action)
+
+                    ep_reward += float(reward)
+                    ep_xvel.append(float(info.get("debug/x_vel", 0.0)))
+
+                    done = terminated or truncated
+
+                returns.append(ep_reward)
+
+                if ep_xvel:
+                    xvels.append(sum(ep_xvel) / len(ep_xvel))
+
+            mean_reward = sum(returns) / len(returns)
+            std_reward = (sum((r - mean_reward) ** 2 for r in returns) / len(returns)) ** 0.5
+            mean_xvel = sum(xvels) / len(xvels) if xvels else 0.0
+
+            self.logger.record("eval/mean_reward", mean_reward)
+            self.logger.record("eval/std_reward", std_reward)
+            self.logger.record("eval/mean_x_vel", mean_xvel)
             eval_env.close()
             self._pbar.set_postfix(
                 eval=f"{float(mean_reward):.1f}",
