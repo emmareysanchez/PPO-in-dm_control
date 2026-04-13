@@ -19,22 +19,22 @@ from tqdm import tqdm
 
 from jimena.src.sac.env import EnvSpec, make_eval_env, make_train_env, resolve_env_spec
 
-
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-TRIAL_STEPS   = 500_000   # steps por trial
-N_TRIALS      = 30        # trials totales (~20-24h con GPU)
-EVAL_EPISODES = 5         # episodios de evaluación al final de cada trial
-STUDY_NAME    = "sac_walker_v2"
-STORAGE       = "sqlite:///optuna_sac_v2.db"   # persiste resultados en disco
+TRIAL_STEPS = 500_000  # steps por trial
+N_TRIALS = 30  # trials totales (~20-24h con GPU)
+EVAL_EPISODES = 5  # episodios de evaluación al final de cada trial
+STUDY_NAME = "sac_walker_v2"
+STORAGE = "sqlite:///optuna_sac_v2.db"  # persiste resultados en disco
 BEST_PARAMS_PATH = Path("optuna_best_params_v2.yaml")
 
 
 # ---------------------------------------------------------------------------
 # Callback silencioso — solo actualiza tqdm
 # ---------------------------------------------------------------------------
+
 
 class TrialProgressCallback(BaseCallback):
     def __init__(self, total_steps: int) -> None:
@@ -60,19 +60,24 @@ class TrialProgressCallback(BaseCallback):
 # Objective
 # ---------------------------------------------------------------------------
 
+
 def objective(trial: optuna.Trial, env_spec: EnvSpec, device: str, seed: int) -> float:
     # --- sample hyperparameters ---
-    lr              = trial.suggest_float("lr", 1e-5, 5e-4, log=True)
-    buffer_size     = trial.suggest_categorical("buffer_size", [300_000, 500_000, 750_000, 1_000_000])
-    learning_starts = trial.suggest_categorical("learning_starts", [50_000, 75_000, 100_000, 150_000])
+    lr = trial.suggest_float("lr", 1e-5, 5e-4, log=True)
+    buffer_size = trial.suggest_categorical(
+        "buffer_size", [300_000, 500_000, 750_000, 1_000_000]
+    )
+    learning_starts = trial.suggest_categorical(
+        "learning_starts", [50_000, 75_000, 100_000, 150_000]
+    )
 
     trial_seed = seed + trial.number
 
     train_env = make_train_env(spec=env_spec, seed=trial_seed)
-    batch_size=128
-    tau=0.002
-    gamma=0.99
-    gradient_steps=1
+    batch_size = 128
+    tau = 0.002
+    gamma = 0.99
+    gradient_steps = 1
 
     model = SAC(
         policy="CnnPolicy",
@@ -90,6 +95,7 @@ def objective(trial: optuna.Trial, env_spec: EnvSpec, device: str, seed: int) ->
         policy_kwargs={
             "net_arch": [256, 256],
             "share_features_extractor": False,
+            "normalize_images": False,
             "features_extractor_kwargs": {"features_dim": 512},
         },
         device=device,
@@ -137,9 +143,10 @@ def objective(trial: optuna.Trial, env_spec: EnvSpec, device: str, seed: int) ->
 # Main
 # ---------------------------------------------------------------------------
 
+
 def save_best_params(trial: optuna.Trial) -> None:
     data = {
-        "best_trial":  trial.number,
+        "best_trial": trial.number,
         "best_reward": round(float(trial.value), 3),
         "params": {k: v for k, v in trial.params.items()},
     }
@@ -153,10 +160,14 @@ def load_yaml(path: str) -> dict[str, Any]:
 
 
 def main(config_path: str) -> None:
-    cfg      = load_yaml(config_path)
-    seed     = int(cfg.get("experiment", {}).get("seed", 0))
+    cfg = load_yaml(config_path)
+    seed = int(cfg.get("experiment", {}).get("seed", 0))
     device_s = str(cfg.get("experiment", {}).get("device", "cpu"))
-    device   = device_s if not (device_s == "cuda" and not torch.cuda.is_available()) else "cpu"
+    device = (
+        device_s
+        if not (device_s == "cuda" and not torch.cuda.is_available())
+        else "cpu"
+    )
     env_spec = resolve_env_spec(cfg)
 
     random.seed(seed)
@@ -172,7 +183,7 @@ def main(config_path: str) -> None:
         study_name=STUDY_NAME,
         storage=STORAGE,
         direction="maximize",
-        load_if_exists=True,          # reanuda si se interrumpe
+        load_if_exists=True,  # reanuda si se interrumpe
         sampler=optuna.samplers.TPESampler(seed=seed),
         pruner=optuna.pruners.NopPruner(),
     )

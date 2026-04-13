@@ -142,6 +142,7 @@ def main(config_path: str) -> None:
         policy_kwargs={
             "net_arch": [hidden_dim, hidden_dim],
             "share_features_extractor": False,
+            "normalize_images": False,
             "features_extractor_kwargs": {"features_dim": 512},
         },
         tensorboard_log=str(run_dir),
