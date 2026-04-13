@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import random
+import time
 from pathlib import Path
 from typing import Any
 
@@ -19,22 +20,22 @@ from tqdm import tqdm
 
 from jimena.src.sac.env import EnvSpec, make_eval_env, make_train_env, resolve_env_spec
 
-
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
-TRIAL_STEPS   = 500_000   # steps por trial
-N_TRIALS      = 30        # trials totales (~20-24h con GPU)
-EVAL_EPISODES = 5         # episodios de evaluación al final de cada trial
-STUDY_NAME    = "sac_walker_v3"
-STORAGE       = "sqlite:///optuna_sac_v3.db"   # persiste resultados en disco
+TRIAL_STEPS = 2_000_000  # 500_000  # steps por trial
+N_TRIALS = 30  # trials totales (~20-24h con GPU)
+EVAL_EPISODES = 5  # episodios de evaluaci�n al final de cada trial
+STUDY_NAME = "sac_walker_v3"
+STORAGE = "sqlite:///optuna_sac_v3.db"  # persiste resultados en disco
 BEST_PARAMS_PATH = Path("optuna_best_params_v3.yaml")
 
 
 # ---------------------------------------------------------------------------
-# Callback silencioso — solo actualiza tqdm
+# Callback silencioso ? solo actualiza tqdm
 # ---------------------------------------------------------------------------
+
 
 class TrialProgressCallback(BaseCallback):
     def __init__(self, total_steps: int) -> None:
@@ -60,19 +61,26 @@ class TrialProgressCallback(BaseCallback):
 # Objective
 # ---------------------------------------------------------------------------
 
-def objective(trial: optuna.Trial, env_spec: EnvSpec, device: str, seed: int) -> float:
+
+def objective(
+    trial: optuna.Trial, env_spec: EnvSpec, device: str, seed: int, run_name: str
+) -> float:
     # --- sample hyperparameters ---
-    lr              = trial.suggest_float("lr", 1e-5, 5e-4, log=True)
-    buffer_size     = trial.suggest_categorical("buffer_size", [300_000, 500_000, 750_000, 1_000_000])
-    learning_starts = trial.suggest_categorical("learning_starts", [50_000, 75_000, 100_000, 125_000])
+    lr = trial.suggest_float("lr", 1e-5, 5e-4, log=True)
+    buffer_size = trial.suggest_categorical(
+        "buffer_size", [300_000, 500_000, 750_000, 1_000_000]
+    )
+    learning_starts = trial.suggest_categorical(
+        "learning_starts", [50_000, 75_000, 100_000, 125_000]
+    )
 
     trial_seed = seed + trial.number
 
     train_env = make_train_env(spec=env_spec, seed=trial_seed)
-    batch_size=128
-    tau=0.002
-    gamma=0.99
-    gradient_steps=1
+    batch_size = 128
+    tau = 0.002
+    gamma = 0.99
+    gradient_steps = 1
 
     model = SAC(
         policy="CnnPolicy",
@@ -110,7 +118,7 @@ def objective(trial: optuna.Trial, env_spec: EnvSpec, device: str, seed: int) ->
     eval_env = make_eval_env(
         spec=env_spec,
         seed=trial_seed + 999,
-        video_dir=str(Path("optuna_videos") / STUDY_NAME / f"trial_{trial.number}"),
+        video_dir=str(Path("optuna_videos") / run_name / f"trial_{trial.number}"),
     )
     mean_reward, std_reward = evaluate_policy(
         model,
@@ -138,9 +146,10 @@ def objective(trial: optuna.Trial, env_spec: EnvSpec, device: str, seed: int) ->
 # Main
 # ---------------------------------------------------------------------------
 
+
 def save_best_params(trial: optuna.Trial) -> None:
     data = {
-        "best_trial":  trial.number,
+        "best_trial": trial.number,
         "best_reward": round(float(trial.value), 3),
         "params": {k: v for k, v in trial.params.items()},
     }
@@ -154,10 +163,14 @@ def load_yaml(path: str) -> dict[str, Any]:
 
 
 def main(config_path: str) -> None:
-    cfg      = load_yaml(config_path)
-    seed     = int(cfg.get("experiment", {}).get("seed", 0))
+    cfg = load_yaml(config_path)
+    seed = int(cfg.get("experiment", {}).get("seed", 0))
     device_s = str(cfg.get("experiment", {}).get("device", "cpu"))
-    device   = device_s if not (device_s == "cuda" and not torch.cuda.is_available()) else "cpu"
+    device = (
+        device_s
+        if not (device_s == "cuda" and not torch.cuda.is_available())
+        else "cpu"
+    )
     env_spec = resolve_env_spec(cfg)
 
     random.seed(seed)
@@ -166,6 +179,9 @@ def main(config_path: str) -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
+    run_name = time.strftime("%Y-%m-%d_%H-%M-%S")
+    (Path("optuna_videos") / run_name).mkdir(parents=True, exist_ok=True)
+
     # Silenciar logs de optuna salvo warnings
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -173,7 +189,7 @@ def main(config_path: str) -> None:
         study_name=STUDY_NAME,
         storage=STORAGE,
         direction="maximize",
-        load_if_exists=True,          # reanuda si se interrumpe
+        load_if_exists=True,  # reanuda si se interrumpe
         sampler=optuna.samplers.TPESampler(seed=seed),
         pruner=optuna.pruners.NopPruner(),
     )
@@ -181,7 +197,9 @@ def main(config_path: str) -> None:
     outer_pbar = tqdm(total=N_TRIALS, desc="Trials", unit="trial", dynamic_ncols=True)
 
     def wrapped_objective(trial: optuna.Trial) -> float:
-        result = objective(trial=trial, env_spec=env_spec, device=device, seed=seed)
+        result = objective(
+            trial=trial, env_spec=env_spec, device=device, seed=seed, run_name=run_name
+        )
         outer_pbar.update(1)
         try:
             best = study.best_trial
