@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import random
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -124,6 +125,11 @@ def objective(
     gamma = 0.99
     gradient_steps = 1
 
+    trial_zfill = len(str(N_TRIALS))
+    trial_str = str(trial.number).zfill(trial_zfill)
+    trial_video_dir = Path("optuna_videos") / run_name / f"trial_{trial_str}"
+    run_dir = Path("optuna_videos") / run_name
+
     model = SAC(
         policy="CnnPolicy",
         env=train_env,
@@ -143,15 +149,11 @@ def objective(
             "normalize_images": False,
             "features_extractor_kwargs": {"features_dim": 512},
         },
+        tensorboard_log=str(run_dir / "tensorboard"),
         device=device,
         seed=trial_seed,
         verbose=0,
     )
-
-    trial_zfill = len(str(N_TRIALS))
-    trial_str = str(trial.number).zfill(trial_zfill)
-    trial_video_dir = Path("optuna_videos") / run_name / f"trial_{trial_str}"
-    run_dir = Path("optuna_videos") / run_name
 
     callback = TrialProgressCallback(
         total_steps=TRIAL_STEPS,
@@ -165,6 +167,7 @@ def objective(
     model.learn(
         total_timesteps=TRIAL_STEPS,
         callback=callback,
+        tb_log_name=f"trial_{trial_str}",
         reset_num_timesteps=True,
     )
 
@@ -239,7 +242,7 @@ def load_yaml(path: str) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def main(config_path: str) -> None:
+def main(config_path: str, resume_dir: str | None = None) -> None:
     cfg = load_yaml(config_path)
     seed = int(cfg.get("experiment", {}).get("seed", 0))
     device_s = str(cfg.get("experiment", {}).get("device", "cpu"))
@@ -256,8 +259,21 @@ def main(config_path: str) -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-    run_name = time.strftime("%Y-%m-%d_%H-%M-%S")
-    (Path("optuna_videos") / run_name).mkdir(parents=True, exist_ok=True)
+    if resume_dir is not None:
+        resume_path = Path(resume_dir)
+        if not resume_path.exists():
+            raise FileNotFoundError(f"Resume directory not found: {resume_path}")
+        run_name = resume_path.name
+        completed = len(list(resume_path.glob("results_*.json")))
+        remaining = max(0, N_TRIALS - completed)
+        print(f"[resume] run={run_name}  completed={completed}  remaining={remaining}")
+        if remaining == 0:
+            print("[resume] All trials already completed, nothing to do.")
+            return
+    else:
+        run_name = time.strftime("%Y-%m-%d_%H-%M-%S")
+        remaining = N_TRIALS
+        (Path("optuna_videos") / run_name).mkdir(parents=True, exist_ok=True)
 
     # Silenciar logs de optuna salvo warnings
     optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -271,7 +287,21 @@ def main(config_path: str) -> None:
         pruner=optuna.pruners.NopPruner(),
     )
 
-    outer_pbar = tqdm(total=N_TRIALS, desc="Trials", unit="trial", dynamic_ncols=True)
+    tb_logdir = Path("optuna_videos") / run_name / "tensorboard"
+    tb_logdir.mkdir(parents=True, exist_ok=True)
+    tb_port = 6006
+    tb_proc = subprocess.Popen(
+        ["tensorboard", "--logdir", str(tb_logdir), "--port", str(tb_port)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    # give tensorboard a moment to bind the port
+    time.sleep(2)
+    print(
+        f"\nTensorBoard running at http://localhost:{tb_port}  (logdir: {tb_logdir})\n"
+    )
+
+    outer_pbar = tqdm(total=remaining, desc="Trials", unit="trial", dynamic_ncols=True)
 
     def wrapped_objective(trial: optuna.Trial) -> float:
         result = objective(
@@ -287,8 +317,9 @@ def main(config_path: str) -> None:
             pass  # primer trial aun no registrado como best
         return result
 
-    study.optimize(wrapped_objective, n_trials=N_TRIALS, gc_after_trial=True)
+    study.optimize(wrapped_objective, n_trials=remaining, gc_after_trial=True)
     outer_pbar.close()
+    tb_proc.terminate()
 
     # --- resultados ---
     best = study.best_trial
@@ -307,5 +338,13 @@ def main(config_path: str) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="sac.yaml")
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help="Path to a previous run's timestamp directory "
+        "(e.g. optuna_videos/2026-04-13_09-00-00) to resume from.",
+    )
     args = parser.parse_args()
-    main(config_path=args.config)
+    main(config_path=args.config, resume_dir=args.resume)
