@@ -24,22 +24,37 @@ from jimena.src.sac.env import EnvSpec, make_eval_env, make_train_env, resolve_e
 # Config
 # ---------------------------------------------------------------------------
 
-TRIAL_STEPS = 2_000_000  # 500_000  # steps por trial
+TRIAL_STEPS = 2_000_000  # steps por trial
+VIDEO_FREQ = 250_000  # grabar vídeo de evaluación cada N steps
 N_TRIALS = 30  # trials totales (~20-24h con GPU)
-EVAL_EPISODES = 5  # episodios de evaluaci�n al final de cada trial
-STUDY_NAME = "sac_walker_v3"
-STORAGE = "sqlite:///optuna_sac_v3.db"  # persiste resultados en disco
-BEST_PARAMS_PATH = Path("optuna_best_params_v3.yaml")
+EVAL_EPISODES = 5  # episodios de evaluación al final de cada trial
+STUDY_NAME = "sac_walker_v4"
+STORAGE = "sqlite:///optuna_sac_v4.db"  # persiste resultados en disco
+BEST_PARAMS_PATH = Path("optuna_best_params_v4.yaml")
 
 
 # ---------------------------------------------------------------------------
-# Callback silencioso ? solo actualiza tqdm
+# Callback: progreso + vídeos periódicos de evaluación
 # ---------------------------------------------------------------------------
 
 
 class TrialProgressCallback(BaseCallback):
-    def __init__(self, total_steps: int) -> None:
+    def __init__(
+        self,
+        total_steps: int,
+        env_spec: EnvSpec,
+        trial_seed: int,
+        video_base_dir: Path,
+        video_freq: int,
+        eval_episodes: int,
+    ) -> None:
         super().__init__(verbose=0)
+        self.env_spec = env_spec
+        self.trial_seed = trial_seed
+        self.video_base_dir = video_base_dir
+        self.video_freq = int(video_freq)
+        self.eval_episodes = int(eval_episodes)
+        self._next_video_at = int(video_freq)
         self._pbar = tqdm(
             total=int(total_steps),
             desc="  steps",
@@ -49,8 +64,28 @@ class TrialProgressCallback(BaseCallback):
         )
 
     def _on_step(self) -> bool:
-        self._pbar.n = int(self.num_timesteps)
+        step = int(self.num_timesteps)
+        self._pbar.n = step
         self._pbar.refresh()
+
+        if step >= self._next_video_at:
+            step_str = str(self._next_video_at).zfill(len(str(TRIAL_STEPS)))
+            video_dir = self.video_base_dir / step_str
+            eval_env = make_eval_env(
+                spec=self.env_spec,
+                seed=self.trial_seed + self._next_video_at,
+                video_dir=str(video_dir),
+            )
+            evaluate_policy(
+                self.model,
+                eval_env,
+                n_eval_episodes=self.eval_episodes,
+                deterministic=True,
+                render=False,
+            )
+            eval_env.close()
+            self._next_video_at += self.video_freq
+
         return True
 
     def _on_training_end(self) -> None:
@@ -106,7 +141,20 @@ def objective(
         verbose=0,
     )
 
-    callback = TrialProgressCallback(total_steps=TRIAL_STEPS)
+    trial_video_dir = (
+        Path("optuna_videos")
+        / run_name
+        / f"trial_{str(trial.number).zfill(len(str(N_TRIALS)))}"
+    )
+
+    callback = TrialProgressCallback(
+        total_steps=TRIAL_STEPS,
+        env_spec=env_spec,
+        trial_seed=trial_seed,
+        video_base_dir=trial_video_dir,
+        video_freq=VIDEO_FREQ,
+        eval_episodes=EVAL_EPISODES,
+    )
 
     model.learn(
         total_timesteps=TRIAL_STEPS,
@@ -114,11 +162,11 @@ def objective(
         reset_num_timesteps=True,
     )
 
-    # --- evaluate ---
+    # --- evaluate final (step 2_000_000) ---
     eval_env = make_eval_env(
         spec=env_spec,
         seed=trial_seed + 999,
-        video_dir=str(Path("optuna_videos") / run_name / f"trial_{trial.number}"),
+        video_dir=str(trial_video_dir / str(TRIAL_STEPS).zfill(len(str(TRIAL_STEPS)))),
     )
     mean_reward, std_reward = evaluate_policy(
         model,
@@ -224,7 +272,7 @@ def main(config_path: str) -> None:
     print("=" * 60)
     print(f"\nResults saved to: {STORAGE}")
     print("Visualize with:")
-    print("  optuna-dashboard sqlite:///optuna_sac_v3.db")
+    print("  optuna-dashboard sqlite:///optuna_sac_v4.db")
 
 
 if __name__ == "__main__":
@@ -232,3 +280,4 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str, default="sac.yaml")
     args = parser.parse_args()
     main(config_path=args.config)
+    
