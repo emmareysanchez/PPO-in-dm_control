@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 import time
@@ -55,6 +56,7 @@ class TrialProgressCallback(BaseCallback):
         self.video_freq = int(video_freq)
         self.eval_episodes = int(eval_episodes)
         self._next_video_at = int(video_freq)
+        self.eval_log: list[dict] = []
         self._pbar = tqdm(
             total=int(total_steps),
             desc="  steps",
@@ -76,7 +78,7 @@ class TrialProgressCallback(BaseCallback):
                 seed=self.trial_seed + self._next_video_at,
                 video_dir=str(video_dir),
             )
-            evaluate_policy(
+            mean_reward, std_reward = evaluate_policy(
                 self.model,
                 eval_env,
                 n_eval_episodes=self.eval_episodes,
@@ -84,6 +86,11 @@ class TrialProgressCallback(BaseCallback):
                 render=False,
             )
             eval_env.close()
+            self.eval_log.append({
+                "step": self._next_video_at,
+                "mean_reward": round(float(mean_reward), 3),
+                "std_reward": round(float(std_reward), 3),
+            })
             self._next_video_at += self.video_freq
 
         return True
@@ -141,11 +148,10 @@ def objective(
         verbose=0,
     )
 
-    trial_video_dir = (
-        Path("optuna_videos")
-        / run_name
-        / f"trial_{str(trial.number).zfill(len(str(N_TRIALS)))}"
-    )
+    trial_zfill = len(str(N_TRIALS))
+    trial_str = str(trial.number).zfill(trial_zfill)
+    trial_video_dir = Path("optuna_videos") / run_name / f"trial_{trial_str}"
+    run_dir = Path("optuna_videos") / run_name
 
     callback = TrialProgressCallback(
         total_steps=TRIAL_STEPS,
@@ -162,7 +168,7 @@ def objective(
         reset_num_timesteps=True,
     )
 
-    # --- evaluate final (step 2_000_000) ---
+    # --- evaluate final (step TRIAL_STEPS) ---
     eval_env = make_eval_env(
         spec=env_spec,
         seed=trial_seed + 999,
@@ -177,6 +183,29 @@ def objective(
     )
     eval_env.close()
     train_env.close()
+
+    # append final step to eval log and write JSON
+    callback.eval_log.append({
+        "step": TRIAL_STEPS,
+        "mean_reward": round(float(mean_reward), 3),
+        "std_reward": round(float(std_reward), 3),
+    })
+    results = {
+        "trial": trial.number,
+        "params": {
+            "lr": lr,
+            "buffer_size": buffer_size,
+            "learning_starts": learning_starts,
+            "batch_size": batch_size,
+            "tau": tau,
+            "gamma": gamma,
+            "gradient_steps": gradient_steps,
+        },
+        "eval": callback.eval_log,
+    }
+    results_path = run_dir / f"results_{trial_str}.json"
+    with open(results_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
 
     print(
         f"  trial {trial.number:>3}  "
@@ -280,4 +309,3 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str, default="sac.yaml")
     args = parser.parse_args()
     main(config_path=args.config)
-    
