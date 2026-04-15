@@ -26,13 +26,13 @@ from jimena.src.sac.env import EnvSpec, make_eval_env, make_train_env, resolve_e
 # Config
 # ---------------------------------------------------------------------------
 
-TRIAL_STEPS = 2_000_000  # steps por trial
+TRIAL_STEPS = 1_000_000  # steps por trial
 VIDEO_FREQ = 250_000  # grabar vídeo de evaluación cada N steps
 N_TRIALS = 30  # trials totales (~20-24h con GPU)
-EVAL_EPISODES = 5  # episodios de evaluación al final de cada trial
-STUDY_NAME = "sac_walker_v4"
+EVAL_EPISODES = 4  # episodios de evaluación al final de cada trial
+STUDY_NAME = "sac_walker_v5"
 STORAGE = "sqlite:///optuna_sac_v4.db"  # persiste resultados en disco
-BEST_PARAMS_PATH = Path("optuna_best_params_v4.yaml")
+BEST_PARAMS_PATH = Path("optuna_best_params_v5.yaml")
 
 
 # ---------------------------------------------------------------------------
