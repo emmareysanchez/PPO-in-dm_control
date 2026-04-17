@@ -17,7 +17,7 @@ def load_yaml(path: str) -> dict[str, Any]:
 
 
 def resolve_seed(cfg: dict[str, Any]) -> int:
-    return int(cfg.get("experiment", {}).get("seed", 0))
+    return int(cfg.get("experiment", {}).get("seed", 42))
 
 
 def main(config_path: str, ckpt_path: str, episodes: int) -> None:

@@ -33,7 +33,7 @@ def resolve_device(cfg: dict[str, Any]) -> str:
 
 
 def resolve_seed(cfg: dict[str, Any]) -> int:
-    return int(cfg.get("experiment", {}).get("seed", 0))
+    return int(cfg.get("experiment", {}).get("seed", 42))
 
 
 class SaveEvalCallback(BaseCallback):
@@ -99,6 +99,7 @@ class SaveEvalCallback(BaseCallback):
 
 
 def main(config_path: str) -> None:
+    
     cfg = load_yaml(config_path)
     seed = resolve_seed(cfg)
     device = resolve_device(cfg)
@@ -126,6 +127,22 @@ def main(config_path: str) -> None:
     hidden_dim = int(arch_cfg.get("hidden_dim", 256))
     total_steps = int(train_cfg.get("total_steps", 1_500_000))
 
+    print("SAC CONFIG REAL:")
+    print({
+        "lr": float(sac_cfg.get("lr", 1e-4)),
+        "buffer_size": int(sac_cfg.get("buffer_size", 100_000)),
+        "batch_size": int(sac_cfg.get("batch_size", 256)),
+        "tau": float(sac_cfg.get("tau", 0.005)),
+        "gamma": float(sac_cfg.get("gamma", 0.99)),
+        "train_freq": int(sac_cfg.get("train_freq", 1)),
+        "gradient_steps": int(train_cfg.get("gradient_steps", 1)),
+        "learning_starts": int(train_cfg.get("learning_starts", 25_000)),
+        "ent_coef": sac_cfg.get("ent_coef", "auto"),
+        "target_entropy": sac_cfg.get("target_entropy", "auto"),
+        "target_update_interval": int(sac_cfg.get("target_update_interval", 1)),
+        "hidden_dim": hidden_dim,
+    })
+
     model = SAC(
         policy="CnnPolicy",
         env=train_env,
@@ -142,8 +159,7 @@ def main(config_path: str) -> None:
         policy_kwargs={
             "net_arch": [hidden_dim, hidden_dim],
             "share_features_extractor": False,
-            "normalize_images": False,
-            "features_extractor_kwargs": {"features_dim": 512},
+            "features_extractor_kwargs": {"features_dim": 256},
         },
         tensorboard_log=str(run_dir),
         device=device,

@@ -1,14 +1,14 @@
 experiment:
   name: walker_sac_simple
   device: cuda
-  seed: 0
+  seed: 42
 
 environment:
   env_id: Walker2d-v5
   obs_h: 64
   obs_w: 64
   frame_stack: 3
-  grayscale: true
+  grayscale: false
   action_repeat: 1
   time_limit: 1000
   n_envs: 1
@@ -20,22 +20,22 @@ architecture:
   hidden_dim: 256
 
 sac:
-  lr: 1e-4
+  lr: 3e-5
   gamma: 0.99
   tau: 0.005
-  batch_size: 128
-  buffer_size: 300000
-  train_freq: 2
+  batch_size: 256
+  buffer_size: 100000
+  train_freq: 1
   target_update_interval: 1
   ent_coef: auto
 
 train:
   total_steps: 5000000
   gradient_steps: 1
-  learning_starts: 50000
-  checkpoint_freq: 300000
+  learning_starts: 20000
+  checkpoint_freq: 100000
   eval_freq: 100000
-  eval_episodes: 3
+  eval_episodes: 5
 
 logging:
   save_freq: 100000
